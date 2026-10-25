@@ -1,0 +1,9 @@
+{
+  "id": "wasm-hello",
+  "name": "WASM Hello",
+  "version": "1.0.0",
+  "backend": "wasm",
+  "entry": "hello.wasm",
+  "enabled": true,
+  "timeouts": { "startupMs": 10000, "callMs": 15000 }
+}

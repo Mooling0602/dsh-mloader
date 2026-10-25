@@ -1,0 +1,9 @@
+{
+  "id": "wasm-loop",
+  "name": "WASM Infinite Loop",
+  "version": "1.0.0",
+  "backend": "wasm",
+  "entry": "loop.wasm",
+  "enabled": true,
+  "timeouts": { "startupMs": 5000, "callMs": 1200 }
+}

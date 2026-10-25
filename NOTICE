@@ -1,0 +1,36 @@
+dsh-mloader —— dsh 多运行时插件码头
+Copyright (C) 2026 木泠
+
+本文件说明本项目的版权归属与许可证适用方式。许可证全文见：
+
+  LICENSE         GNU LGPL v3（附加条款，GitHub 据此识别为 LGPL-3.0）
+  COPYING         GNU GPL v3 全文（LGPL v3 通过引用纳入其条款）
+  COPYING.LESSER  GNU LGPL v3 附加条款（与 LICENSE 相同，遵循 FSF 惯例）
+
+LGPL v3 由两部分组成：GPL v3 的全部条款，加上 LGPL 的附加许可。
+两份文件缺一不可，请一并阅读。
+
+----------------------------------------------------------------------
+关于插件
+----------------------------------------------------------------------
+
+本许可证只约束码头（loader）自身。通过码头加载的外部插件是独立作品，
+不受本许可证约束 —— 你可以为自己的插件选择任何许可证，包括闭源。
+这是选择 LGPL 而非 GPL 的原因。
+
+src/runtime/dsh_runtime.py 是码头提供给插件的接口（ABI）。插件通过
+`from dsh_runtime import plugin` 使用它，这构成 LGPL 意义上的「使用库
+接口」，不使插件成为衍生作品。
+
+----------------------------------------------------------------------
+依赖
+----------------------------------------------------------------------
+
+本项目依赖的 DeepSeek Harness 及其组件均为 MIT 许可证：
+
+  @deepseek-ai/dsh            MIT
+  @deepseek-ai/cordis         MIT
+  @deepseek-ai/dsh-tools      MIT
+  @deepseek-ai/dsh-commands   MIT
+
+MIT 与 LGPL-3.0 兼容。本项目不包含上述软件的任何代码副本。

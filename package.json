@@ -1,0 +1,47 @@
+{
+  "name": "dsh-mloader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "dsh 多运行时插件码头（multi-runtime loader）：托管 Python / WASM 插件，让它们经本插件接入 dsh，而不成为 Cordis 插件",
+  "license": "LGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mooling0602/dsh-mloader.git"
+  },
+  "homepage": "https://github.com/Mooling0602/dsh-mloader#readme",
+  "bugs": {
+    "url": "https://github.com/Mooling0602/dsh-mloader/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin-loader",
+    "python",
+    "wasm"
+  ],
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./runtime/*": "./src/runtime/*"
+  },
+  "files": [
+    "src",
+    "!src/**/__pycache__",
+    "!src/**/*.pyc",
+    "seed",
+    "cordis.patch.yml",
+    "COPYING",
+    "COPYING.LESSER",
+    "NOTICE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

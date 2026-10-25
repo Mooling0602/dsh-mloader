@@ -1,0 +1,9 @@
+{
+  "id": "py-reentrant",
+  "name": "Re-entrant Event Handler",
+  "version": "1.0.0",
+  "backend": "python",
+  "entry": "plugin.py",
+  "enabled": true,
+  "timeouts": { "startupMs": 10000, "callMs": 5000 }
+}

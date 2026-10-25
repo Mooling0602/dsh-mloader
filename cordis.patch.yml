@@ -1,0 +1,38 @@
+# dsh-mloader 的默认配置层。
+#
+# ★ 这是"装完即用"的关键：只要本包出现在 profile 的 `dsh.profile.bundles` 里，
+#   dsh 就会自动读取并应用这个文件（package.json 的 `dsh.bundle.patch` 指向它）。
+#   用户**不需要**在自己的 `cordis.patch.yml` 里手写任何一段配置。
+#
+#   想改这里的任何一项，只需在 profile 的 `cordis.patch.yml` 里用同一个 id 覆盖：
+#
+#     - id: dsh-mloader
+#       config:
+#         console: false
+#
+# 全部项都可以省略 —— 下面这些值也就是 src/index.js 里 DEFAULTS 的内容，
+# 写在这里是为了让"有哪些开关"一眼可见。
+- insert:
+    - id: dsh-mloader
+      name: dsh-mloader
+      config:
+        # 额外的插件根目录。留空即可：<profile>/mloader/plugins 会被自动发现
+        # （码头从 ctx.baseUrl 定位当前 profile，不依赖任何环境变量）。
+        roots: []
+        autoEnable: true
+        restartOnCrash: false
+        pythonBin: python3
+        statusTool: true
+        # 注册 /mloader-status 斜杠命令（用户敲），true=默认名，字符串=自定义名，false=关闭。
+        # 依赖可选的 commands 服务；缺失时自动跳过，不影响插件挂载。
+        statusCommand: true
+        # 首次启动把包内示例释放到 <profile>/mloader/plugins/（存在即跳过，绝不覆盖）。
+        seedExamples: true
+        # 终端输出：true=只报加载/卸载等生命周期节点；'verbose'=额外报扫描细节；
+        # false=完全静默。默认为 true —— dsh 的 ctx.logger 不会打印到终端，
+        # 不显式输出的话，插件装了还是没装，在命令行里完全看不出来。
+        console: true
+        # WASM 后端默认关闭。v1 不提供 WASM 默认示例；
+        # 开启前请先跑 test/wasm-safety.mjs（需自行编译 wasm 二进制）。
+        wasm:
+          enabled: false

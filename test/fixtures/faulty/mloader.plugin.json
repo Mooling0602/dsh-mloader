@@ -1,0 +1,9 @@
+{
+  "id": "faulty",
+  "name": "Fault Injection Fixture",
+  "version": "1.0.0",
+  "backend": "python",
+  "entry": "plugin.py",
+  "enabled": true,
+  "timeouts": { "startupMs": 10000, "callMs": 1500 }
+}
