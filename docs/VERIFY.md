@@ -130,7 +130,7 @@ dsh plugin --profile web remove dsh-mloader
 
 ## 9. 已验证的测试基线
 
-重启前代码已通过本机全部测试（**222 项断言**，11 套）：
+重启前代码已通过本机全部测试（**265 项断言**，12 套）：
 
 | 测试 | 断言数 | 覆盖 |
 |---|---|---|
@@ -140,6 +140,7 @@ dsh plugin --profile web remove dsh-mloader
 | `wasm-safety.mjs` | 13 | ★ WASM 死循环不阻塞主线程 |
 | `waterfall.mjs` | 10 | ★ 监听器不阻塞工具执行链 |
 | `reentrancy.mjs` | 13 | ★ 端到端事件死锁回归（真实子进程） |
+| `exec-payload.mjs` | 43 | ★ 宿主 exec 对象安全跨进程（环 / AbortSignal 投影 + 脏载荷后工具仍可用） |
 | `command.mjs` | 33 | `/mloader-status` 命令（真实 CommandRuntime） |
 | `profile-install.mjs` | 37 | 插件装进 profile 的路径解析与加载（含 `ctx.baseUrl` 探测） |
 | `seed.mjs` | 28 | 内置示例释放（含「绝不覆盖用户改动」） |
@@ -149,7 +150,7 @@ dsh plugin --profile web remove dsh-mloader
 ```bash
 cd dsh-mloader
 for t in integration edge-cases dual-backend wasm-safety waterfall \
-         reentrancy command profile-install seed crash-safety console; do
+         reentrancy exec-payload command profile-install seed crash-safety console; do
   printf "%-16s " "$t"; node test/$t.mjs 2>&1 | grep -E "全部通过|项失败"
 done
 ```

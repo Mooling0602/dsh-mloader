@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { PROTOCOL_VERSION } from '../contract.js'
+import { projectEventArgs } from '../serialize.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 /** loader 自带的 Python 引导器；插件作者不需要关心它。 */
@@ -249,16 +250,47 @@ export class PythonBackendInstance {
     this.#write({ v: PROTOCOL_VERSION, id, ...body })
   }
 
+  /**
+   * 写一帧到子进程 stdin。
+   *
+   * ★ 序列化与写入必须分成两个 try —— 这是 2026-10-26 事故的直接修复点。
+   *
+   * 事故：`tools/execute` 的首参是带环的活 exec 对象，`JSON.stringify` 抛
+   * `Converting circular structure to JSON`。当时两种失败共用一个 catch，
+   * 于是**序列化失败也被当成"对端已关闭"**，置 `stdinBroken = true`。
+   * 从那以后每一帧（包括之后所有 tool.call）都被静默丢弃，
+   * 对外表现就是"插件工具全部 15 秒超时"，而子进程本身活得好好的。
+   *
+   * 现在：
+   *   - 序列化失败 → 只丢这一帧，通道状态不变，warn 里带上帧的 op 便于定位；
+   *   - 写入失败 → 才是真正的通道故障，置 stdinBroken 止损。
+   *
+   * @returns 是否真的写出去了。调用方不需要它，但测试要靠它断言"没被静默丢弃"。
+   */
   #write(frame) {
-    if (this.child === null || this.child.killed) return
+    if (this.child === null || this.child.killed) return false
     // stdin 已报错 / 已关闭：再写只会继续产生 EPIPE。直接丢弃。
-    if (this.stdinBroken) return
+    if (this.stdinBroken) return false
+
+    let line
     try {
-      this.child.stdin.write(`${JSON.stringify(frame)}\n`)
+      line = `${JSON.stringify(frame)}\n`
+    } catch (error) {
+      // 只有这一帧失败。绝不能把 stdinBroken 置位 —— 那会毒死整条通道。
+      this.logger?.warn?.(
+        `[${this.spec.id}] frame not serializable (op=${frame?.op ?? '?'}): ${error.message}`,
+      )
+      return false
+    }
+
+    try {
+      this.child.stdin.write(line)
+      return true
     } catch (error) {
       // 同步异常（例如流已 destroyed）。异步 EPIPE 由 stdin 的 'error' 监听器接住。
       this.stdinBroken = true
-      this.logger?.warn?.(`[${this.spec.id}] write failed: ${error.message}`)
+      this.logger?.warn?.(`[${this.spec.id}] write failed (op=${frame?.op ?? '?'}): ${error.message}`)
+      return false
     }
   }
 
@@ -277,7 +309,20 @@ export class PythonBackendInstance {
       // Node 的 timer 不应阻止进程退出
       if (typeof timer.unref === 'function') timer.unref()
       this.pending.set(id, { resolve, timer })
-      this.#write(frame)
+      // 没写出去 = 永远等不到回包。立刻失败，别让调用方白等满 callMs。
+      if (!this.#write(frame)) {
+        this.pending.delete(id)
+        clearTimeout(timer)
+        resolve({
+          id,
+          ok: false,
+          error: {
+            kind: 'transport',
+            message: `${op} could not be delivered to plugin ${this.spec.id} `
+              + '(stdin closed or payload not serializable)',
+          },
+        })
+      }
     })
   }
 
@@ -320,10 +365,20 @@ export class PythonBackendInstance {
     return reply.result
   }
 
-  /** 把一个宿主事件投递给插件。 */
+  /**
+   * 把一个宿主事件投递给插件。
+   *
+   * ★ 参数必须先投影成纯数据（见 src/serialize.js 的事故说明）。
+   *
+   * `tools/execute` 这类事件的首参是 dsh 的活 exec 对象，里面有指向 agent 树的环
+   * 和宿主 AbortSignal。原样发出去会让 JSON.stringify 抛错；更糟的是当年那次
+   * 抛错被 `#write` 当成"对端已关闭"处理，把整条通道永久关闭了 ——
+   * 于是所有插件工具调用一起超时。投影 + 单帧失败隔离，两道防线都要在。
+   */
   async dispatchEvent(event, args) {
     if (this.stopped || this.child === null) return undefined
-    const reply = await this.#request('event', { event, args }, this.spec.timeouts.callMs)
+    const payload = { event, args: projectEventArgs(event, args) }
+    const reply = await this.#request('event', payload, this.spec.timeouts.callMs)
     if (reply.ok !== true) {
       throw new Error(reply.error?.message ?? `event ${event} failed`)
     }

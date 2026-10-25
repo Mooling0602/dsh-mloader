@@ -17,6 +17,7 @@
  */
 
 import { Worker } from 'node:worker_threads'
+import { projectEventArgs } from '../serialize.js'
 
 export class WasmBackendInstance {
   constructor(spec, { logger }) {
@@ -193,7 +194,14 @@ export class WasmBackendInstance {
 
   async dispatchEvent(event, args) {
     try {
-      return await this.#invoke('event', { event, args }, this.spec.timeouts?.callMs ?? 30000)
+      // 与 Python 后端同一条硬规则：过线程/进程边界的东西必须是纯数据。
+      // postMessage 用 structuredClone，遇到 AbortSignal / 宿主对象会直接抛
+      // DataCloneError；投影掉它们（见 src/serialize.js）。
+      return await this.#invoke(
+        'event',
+        { event, args: projectEventArgs(event, args) },
+        this.spec.timeouts?.callMs ?? 30000,
+      )
     } catch (error) {
       this.logger?.warn?.(`[${this.spec.id}] event ${event} failed: ${error.message}`)
       return undefined

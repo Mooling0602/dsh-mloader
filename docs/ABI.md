@@ -226,6 +226,61 @@ const next = () => (cbs.shift() ?? inner)(...args)   // 最后一个参数是 ne
 
 由 `test/waterfall.mjs`（10 项）和 `test/reentrancy.mjs` 逐条断言。
 
+#### ⚠️ 事件载荷必须投影成纯数据（2026-10-26 事故二，比上面那个更难查）
+
+**事故现象**（极具迷惑性）：
+
+| 观察 | 结果 |
+| --- | --- |
+| 插件的工具是否注册成功 | ✅ 成功，`mloader_status` 里能看到 |
+| `mloader_status` 本身 | ✅ 立刻返回 |
+| 插件自己的工具 | ❌ 全部卡满 `tool.call timed out after 15000ms` |
+| 插件子进程 | ✅ 活着，CPU/IO 全平（`/proc/<pid>/io` 的 `rchar`/`wchar` 一动不动） |
+| 同一插件在 dsh 外单独驱动 | ✅ 完全正常（start 113ms / apply 7ms / callTool 4ms） |
+
+**根因**：`tools/execute` 这类 waterfall 事件的首参是 dsh 的**活 exec 对象**：
+
+```js
+{ callId, name, arguments, agent: <Agent>, signal: <AbortSignal>, … }
+```
+
+- `agent` 带着 `ctx → fiber → scope → agent` 的**环**，`JSON.stringify` 直接抛
+  `Converting circular structure to JSON`；
+- `signal` 是带内部槽的宿主对象。
+
+而当时 `#write` 把「序列化失败」和「对端已关闭（EPIPE）」共用了一个 `catch`，
+于是序列化失败也置 `stdinBroken = true` —— **此后每一帧都被静默丢弃**。
+
+所以**第一次工具调用**触发的 `tools/execute` 事件就把整条通道毒死了，
+之后所有 `tool.call` 都发不出去，只能等满 `callMs`。
+这也解释了为什么注册成功、`mloader_status` 正常，唯独插件工具全超时。
+
+**现行规则**（两道防线，缺一不可）：
+
+1. **投影**：过进程/线程边界的东西必须是纯数据。
+   `src/serialize.js` 的 `toTransportable()` / `projectEventArgs()` 负责：
+   环 → `"[Circular]"`，函数 → `"[Function]"`，`AbortSignal` → `{$type, aborted}`，
+   超深/超长 → 截断。`tools/*` 事件的首参走 `projectToolExecution()`，
+   只保留 `callId / rootCallId / name / parent / token / arguments` 和
+   agent 的少数白名单字段 —— 不把整棵 agent 树塞给插件。
+2. **单帧失败隔离**：`#write` 里序列化与写入分成两个 `try`。
+   序列化失败只丢这一帧、不改通道状态；并且 `#request` 发现没写出去就**立刻**
+   用 `kind: 'transport'` 失败，不让调用方白等满 `callMs`。
+
+Python 与 WASM 后端共用同一套投影（WASM 的 `postMessage` 走 structuredClone，
+遇到 `AbortSignal` 会抛 `DataCloneError`，症状相同）。
+
+插件收到的事件首参形状（投影后）：
+
+```jsonc
+{ "$type": "ToolExecution", "callId": "…", "name": "bash",
+  "arguments": { "command": "ls" }, "agent": { "id": "…", "name": "main" },
+  "aborted": false }
+```
+
+由 `test/exec-payload.mjs`（43 项）逐条断言，其中包括
+「脏载荷之后工具仍然可用」这条**事故直接症状**的回归。
+
 ### 3.2 JSON Schema 硬约束（重要）
 
 dsh 的工具 schema 只接受一个**受限 JSON Schema 子集**：

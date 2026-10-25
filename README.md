@@ -471,7 +471,7 @@ WASM 插件用 **core-wasm ABI**（见 [docs/ABI.md §7](docs/ABI.md)），需�
 
 ### ✅ 已在本机实测
 
-十一套测试、**222 项断言**全绿（其中 32 项需要 wasm 二进制）：
+十二套测试、**265 项断言**全绿（其中 32 项需要 wasm 二进制）：
 
 - 真实 Cordis `Context` + 真实 `dsh-tools` `ToolRuntime` 全链路（23 项）
 - 边界场景：schema 预校验、事件白名单、崩溃隔离、卸载清理（17 项）
@@ -479,8 +479,9 @@ WASM 插件用 **core-wasm ABI**（见 [docs/ABI.md §7](docs/ABI.md)），需�
 - **WASM 死循环不阻塞主线程**（13 项，真实死循环 wasm 插件）
 - **事件监听器不阻塞工具执行链**（10 项，覆盖真实 waterfall 语义）
 - **Python 子进程重入不死锁**（13 项）
+- **★ 宿主 exec 对象安全跨进程**：环 / AbortSignal 投影 + 脏载荷后工具仍可用（43 项）
 - `/mloader-status` 命令，真实 `CommandRuntime`（33 项）
-- 插件装进 profile 的路径解析与加载（28 项）
+- 插件装进 profile 的路径解析与加载（37 项）
 - **内置示例释放**，含「绝不覆盖用户改动」（28 项）
 - **插件进程崩溃不拖垮 dsh**：EPIPE / 孤儿进程 / 卸载卡死（10 项）
 - **终端输出**：三档详细度、EPIPE 不抛出、真实挂载/卸载可见（19 项）
@@ -513,6 +514,7 @@ dsh-mloader/                    ← 码头本体（工作区）
 │   ├── contract.js           # 事件白名单、schema 校验、roots 解析
 │   ├── discovery.js          # 扫描 roots 找 mloader.plugin.json
 │   ├── registrar.js          # ★ 注册账本（核心：把插件意图落成 dsh 能力）
+│   ├── serialize.js          # ★ 跨进程载荷投影（环 / AbortSignal → 纯数据）
 │   ├── backends/
 │   │   ├── python.js         # Python 子进程 + NDJSON RPC
 │   │   ├── wasm.js           # WASM 宿主侧（worker 管理 + 超时 terminate）
@@ -526,9 +528,11 @@ dsh-mloader/                    ← 码头本体（工作区）
 │   └── console.js            # ★ 终端输出（dsh 的 ctx.logger 不打印到终端）
 ├── seed/                     # ★ 内置示例（安装后释放到 profile）
 │   └── hello-mloader/        #   用户可读可改的参考实现（唯一的随包示例）
-├── test/                     # 十一套测试 + 测试用插件
+├── test/                     # 十二套测试 + 测试用插件
 │   ├── *.mjs                 #   测试本体
 │   ├── plugins/              #   测试用插件（python-hello / python-advanced / wasm-hello）
+│   ├── deadlock/             #   事件死锁回归夹具（reentrant）
+│   ├── exec-payload/         #   ★ exec 对象跨进程夹具（exec-observer）
 │   └── fixtures/             #   故障注入用（faulty / guarded / wasm-loop）
 └── docs/
     ├── ABI.md                # 完整契约（权威）
@@ -562,6 +566,7 @@ node test/dual-backend.mjs     # 19 项：Python + WASM 共存（需 wasm 二进
 node test/wasm-safety.mjs      # 13 项：★ WASM 死循环不阻塞主线程（同上，否则跳过）
 node test/waterfall.mjs        # 10 项：★ 事件监听器不阻塞工具执行链
 node test/reentrancy.mjs       # 13 项：★ 真实 Python 子进程重入不死锁
+node test/exec-payload.mjs     # 43 项：★ 宿主 exec 对象安全跨进程（环 / AbortSignal 投影）
 node test/command.mjs          # 33 项：/mloader-status 命令（真实 CommandRuntime）
 node test/profile-install.mjs  # 37 项：插件装进 profile 的路径解析与加载（含 ctx.baseUrl 探测）
 node test/seed.mjs             # 28 项：内置示例释放（含「绝不覆盖用户改动」）
@@ -569,7 +574,7 @@ node test/crash-safety.mjs     # 10 项：插件进程崩溃不拖垮 dsh（EPIP
 node test/console.mjs          # 19 项：终端输出（三档详细度 / EPIPE 不抛出）
 ```
 
-合计 **222 项断言**（其中 32 项需要 wasm 二进制）。每套跑 4-6 秒，
+合计 **265 项断言**（其中 32 项需要 wasm 二进制）。每套跑 4-6 秒，
 建议一次跑一两个（工具调用有 15 秒上限）。
 
 > **关于 wasm 二进制**：`.wasm` 文件不进版本库（见 `.gitignore`），所以从 git clone
