@@ -1,17 +1,12 @@
 /**
- * ★ 回归测试：事件监听器不得阻塞 waterfall（工具执行链）。
+ * Regression test: an event listener must not block the waterfall chain.
  *
- * 事故背景（2026-10-26）：
- *   py-hello 订阅了 tools/execute，并在事件处理器里调 ctx.logger.debug。
- *   当时 listener 写成 `async (...) => await dispatchEvent(...)`，而 Cordis 的
- *   waterfall 会 await listener 的返回值，于是宿主阻塞在事件分发上；
- *   插件同时同步等 logger 的 RPC 回包 → 永久互等 → tools 通道被占满 →
- *   dsh 所有工具调用（含 bash）全部超时，只能重启。
- *
- * 本测试直接对 Cordis 的 waterfall 做断言，覆盖三点：
- *   1. 监听器同步把执行链传下去（结果必须是 body 的返回值，不能是 undefined）
- *   2. 插件分发不阻塞主链路（waterfall 耗时必须是毫秒级）
- *   3. 插件事件处理器内回调宿主不会死锁
+ * The test asserts three properties directly against Cordis' waterfall:
+ *   1. The listener advances the chain synchronously, so the tool body result
+ *      comes back instead of undefined.
+ *   2. Dispatching to the plugin does not hold the chain, so the waterfall stays
+ *      in the millisecond range while the plugin handler is deliberately slow.
+ *   3. A plugin handler may call the host (logging) without deadlocking.
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -24,10 +19,10 @@ let passed = 0
 function check(name, condition, detail = '') {
   if (condition) {
     passed++
-    console.log(`  ✓ ${name}`)
+    console.log(`  ok   ${name}`)
   } else {
-    failures.push(`${name}${detail ? ` — ${detail}` : ''}`)
-    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`)
+    failures.push(detail ? `${name} [${detail}]` : name)
+    console.log(`  FAIL ${name}${detail ? ` [${detail}]` : ''}`)
   }
 }
 
@@ -46,13 +41,12 @@ function makeLogger() {
 }
 
 async function main() {
-  section('① 构造一个订阅了 tools/execute 的 registrar')
+  section('1. Build a registrar subscribed to tools/execute')
 
   const root = new Context()
   const logger = makeLogger()
   root.provide('logger', logger)
 
-  // 假的 tools 服务（本测试不关心工具注册，只关心事件）
   root.provide('tools', { register: () => () => {} })
 
   const dispatched = []
@@ -62,81 +56,89 @@ async function main() {
     root,
     logger,
     async () => ({ ok: true }),
-    // 模拟插件侧事件分发：故意"慢"，并且在处理期间回调宿主（写日志）
+    // Simulate the plugin side: slow on purpose, and call the host (log) while handling.
     async (event, args) => {
       dispatched.push({ event, at: Date.now() })
-      // 模拟插件在事件处理器里调 ctx.logger（回到宿主）
-      logger.info(`[plugin] 收到事件 ${event}: ${JSON.stringify(args).slice(0, 60)}`)
-      // 模拟插件处理耗时
+      logger.info(`[plugin] received event ${event}: ${JSON.stringify(args).slice(0, 60)}`)
       await new Promise((resolve) => setTimeout(resolve, 150))
       return undefined
     },
   )
 
   await registrar.handle('events.on', { event: 'tools/execute' })
-  check('订阅成功', registrar.snapshot().events.includes('tools/execute'))
+  check('subscription is recorded', registrar.snapshot().events.includes('tools/execute'))
 
-  section('② ★ waterfall 不被阻塞，且执行链完整')
+  section('2. The waterfall is not blocked and the chain is intact')
   const t0 = Date.now()
   const result = await root.waterfall(
     {},
     'tools/execute',
     { name: 'demo_tool' },
-    // 这是真正的"工具执行体"，必须被执行到
     async () => 'body-result',
   )
   const elapsed = Date.now() - t0
 
-  check('waterfall 返回了 body 的结果（执行链完整）', result === 'body-result', JSON.stringify(result))
-  check('waterfall 未被插件阻塞（<100ms）', elapsed < 100, `${elapsed}ms`)
+  check('waterfall returns the body result', result === 'body-result', JSON.stringify(result))
+  check('waterfall was not blocked by the plugin (<100ms)', elapsed < 100, `${elapsed}ms`)
 
-  section('③ 插件确实收到了事件（异步投递成功）')
-  // 等插件侧的 150ms 处理完成
+  section('3. The plugin receives the event (async delivery works)')
   await new Promise((resolve) => setTimeout(resolve, 300))
-  check('插件收到 tools/execute', dispatched.some((d) => d.event === 'tools/execute'), JSON.stringify(dispatched))
-  const pluginLogs = logger.lines.filter((line) => line.includes('[plugin] 收到事件'))
-  check('插件在事件处理器内成功回调宿主（写日志）', pluginLogs.length > 0, `条数=${pluginLogs.length}`)
+  check(
+    'plugin received tools/execute',
+    dispatched.some((entry) => entry.event === 'tools/execute'),
+    JSON.stringify(dispatched),
+  )
+  const pluginLogs = logger.lines.filter((line) => line.includes('[plugin] received event'))
+  check('plugin called the host from inside the handler', pluginLogs.length > 0, `count=${pluginLogs.length}`)
 
-  section('④ 连续触发不累积阻塞')
+  section('4. Repeated dispatch does not accumulate blocking')
   const timings = []
   for (let i = 0; i < 5; i += 1) {
     const start = Date.now()
     const out = await root.waterfall({}, 'tools/execute', { name: `t${i}` }, async () => `r${i}`)
     timings.push({ elapsed: Date.now() - start, out })
   }
-  check('5 次 waterfall 全部返回正确结果', timings.every((t, i) => t.out === `r${i}`), JSON.stringify(timings.map((t) => t.out)))
-  check('5 次 waterfall 都未被阻塞', timings.every((t) => t.elapsed < 100), timings.map((t) => `${t.elapsed}ms`).join(','))
+  check(
+    '5 waterfalls returned the right results',
+    timings.every((entry, index) => entry.out === `r${index}`),
+    JSON.stringify(timings.map((entry) => entry.out)),
+  )
+  check(
+    '5 waterfalls were not blocked',
+    timings.every((entry) => entry.elapsed < 100),
+    timings.map((entry) => `${entry.elapsed}ms`).join(','),
+  )
 
-  section('⑤ 卸载后仍不破坏执行链')
+  section('5. Disposal does not break the chain')
   registrar.dispose()
   await new Promise((resolve) => setTimeout(resolve, 50))
   const afterDispose = await root.waterfall({}, 'tools/execute', { name: 'x' }, async () => 'still-works')
-  check('卸载后 waterfall 仍返回正确结果', afterDispose === 'still-works', JSON.stringify(afterDispose))
+  check('waterfall still returns the body result after disposal', afterDispose === 'still-works', JSON.stringify(afterDispose))
 
-  section('⑥ 白名单仍然生效')
+  section('6. The whitelist still rejects other events')
   let rejected = false
   try {
     await registrar.handle('events.on', { event: 'agent/assistant-stream' })
   } catch {
     rejected = true
   }
-  check('越权事件被拒绝', rejected)
-  check('白名单含 10 个事件', EVENT_WHITELIST.size === 10, `实际 ${EVENT_WHITELIST.size}`)
+  check('event outside the whitelist is rejected', rejected)
+  check('whitelist contains 10 events', EVENT_WHITELIST.size === 10, `actual ${EVENT_WHITELIST.size}`)
 
-  console.log(`\n${'─'.repeat(60)}`)
+  console.log('')
   if (failures.length === 0) {
-    console.log(`✅ 全部通过：${passed} 项断言`)
+    console.log(`PASS: ${passed} assertions`)
     process.exit(0)
   } else {
-    console.log(`❌ ${failures.length} 项失败 / 共 ${passed + failures.length} 项`)
-    for (const failure of failures) console.log(`   - ${failure}`)
-    console.log('\n--- 日志 ---')
-    for (const line of logger.lines.slice(-30)) console.log(`   ${line}`)
+    console.log(`FAIL: ${failures.length} of ${passed + failures.length} assertions`)
+    for (const failure of failures) console.log(`  - ${failure}`)
+    console.log('\nRecent log lines:')
+    for (const line of logger.lines.slice(-30)) console.log(`  ${line}`)
     process.exit(1)
   }
 }
 
 main().catch((error) => {
-  console.error('\n❌ 测试脚本崩溃:', error)
+  console.error('\nTest script crashed:', error)
   process.exit(1)
 })

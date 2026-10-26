@@ -1,8 +1,8 @@
 {
   "id": "hello-mloader",
-  "name": "Hello Mloader（内置示例）",
+  "name": "Hello Mloader (bundled example)",
   "version": "1.0.0",
-  "description": "dsh-mloader 的内置示例插件：演示注册工具、订阅事件、注册清理。可自由修改，码头不会覆盖。",
+  "description": "Bundled example plugin for dsh-mloader: registers tools, subscribes to events and registers cleanup. Edit it freely; the loader never overwrites your changes.",
   "backend": "python",
   "entry": "plugin.py",
   "enabled": true,

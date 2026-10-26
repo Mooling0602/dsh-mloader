@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "dsh 多运行时插件码头（multi-runtime loader）：托管 Python / WASM 插件，让它们经本插件接入 dsh，而不成为 Cordis 插件",
+  "description": "Multi-runtime plugin loader for DeepSeek Harness: hosts Python and WebAssembly plugins as capabilities of one Cordis plugin.",
   "license": "LGPL-3.0-only",
   "repository": {
     "type": "git",
@@ -24,9 +24,10 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./runtime/*": "./src/runtime/*"
+    "./client": "./client.js"
   },
   "files": [
+    "client.js",
     "src",
     "!src/**/__pycache__",
     "!src/**/*.pyc",
@@ -39,7 +40,23 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale"
+      ]
     }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/build-client.mjs",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=20"

@@ -1,7 +1,8 @@
 /**
- * 边界测试：崩溃隔离 / 超时 / 白名单 / 热重载。
+ * Boundary suite: crash isolation, timeouts, whitelists and reload state.
  *
- * 这些是"独立管理自己的插件"真正要经受的考验。
+ * These are the conditions that independent plugin lifecycle management has to
+ * survive.
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -14,10 +15,10 @@ let passed = 0
 function check(name, condition, detail = '') {
   if (condition) {
     passed++
-    console.log(`  ✓ ${name}`)
+    console.log(`  PASS ${name}`)
   } else {
-    failures.push(`${name}${detail ? ` — ${detail}` : ''}`)
-    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`)
+    failures.push(`${name}${detail ? `: ${detail}` : ''}`)
+    console.log(`  FAIL ${name}${detail ? `: ${detail}` : ''}`)
   }
 }
 
@@ -70,79 +71,78 @@ async function main() {
   const loader = root.get('mloader')
   const stateOf = (id) => loader.list().find((plugin) => plugin.id === id)
 
-  section('① 故障插件已挂载')
-  check('faulty 已 applied', stateOf('faulty')?.state === 'applied', JSON.stringify(stateOf('faulty')))
-  check('guarded 已 applied', stateOf('guarded')?.state === 'applied', JSON.stringify(stateOf('guarded')))
+  section('1. Faulty plugins are mounted')
+  check('faulty is applied', stateOf('faulty')?.state === 'applied', JSON.stringify(stateOf('faulty')))
+  check('guarded is applied', stateOf('guarded')?.state === 'applied', JSON.stringify(stateOf('guarded')))
 
-  section('② schema 预校验拦住 dsh 子集之外的写法')
+  section('2. Schema pre-validation rejects constructs outside the dsh subset')
   const guardedTools = stateOf('guarded')?.tools ?? []
-  check('legal_tool 注册成功', guardedTools.includes('legal_tool'), `实际: ${guardedTools.join(',')}`)
-  check('bad_format 被拒绝', !guardedTools.includes('bad_format'), `实际: ${guardedTools.join(',')}`)
+  check('legal_tool is registered', guardedTools.includes('legal_tool'), `actual: ${guardedTools.join(',')}`)
+  check('bad_format is rejected', !guardedTools.includes('bad_format'), `actual: ${guardedTools.join(',')}`)
   const guardLogs = logger.lines.filter((line) => line.includes('bad_format'))
   check(
-    '拒绝原因被记录（指明 format 不支持）',
+    'the rejection reason is logged (unsupported format keyword)',
     guardLogs.some((line) => line.includes('format')),
     guardLogs.join(' | '),
   )
 
-  section('③ 事件白名单拦住越权订阅')
+  section('3. The event whitelist rejects subscriptions outside it')
   const guardedEvents = stateOf('guarded')?.events ?? []
-  check('越权事件未订阅', !guardedEvents.includes('agent/assistant-stream'), `实际: ${guardedEvents.join(',')}`)
-  const whitelistLogs = logger.lines.filter((line) => line.includes('越权事件'))
-  check('拒绝原因被记录', whitelistLogs.length > 0, whitelistLogs.join(' | '))
+  check('the non-whitelisted event is not subscribed', !guardedEvents.includes('agent/assistant-stream'), `actual: ${guardedEvents.join(',')}`)
+  const whitelistLogs = logger.lines.filter((line) => line.includes('agent/assistant-stream'))
+  check('the rejection reason is logged', whitelistLogs.length > 0, whitelistLogs.join(' | '))
 
-  section('④ 插件崩溃不拖垮宿主')
-  check('whoami 可调用', typeof tools.get('whoami') === 'object')
+  section('4. A plugin crash does not take the host down')
+  check('whoami is callable', typeof tools.get('whoami') === 'object')
   const whoami = await tools.get('whoami').execute({})
-  check('插件运行在独立进程', whoami?.pid !== process.pid, `pid=${whoami?.pid} host=${process.pid}`)
-  check('子进程的父进程是宿主', whoami?.ppid === process.pid, `ppid=${whoami?.ppid}`)
+  check('the plugin runs in its own process', whoami?.pid !== process.pid, `pid=${whoami?.pid} host=${process.pid}`)
+  check('the child process parent is the host', whoami?.ppid === process.pid, `ppid=${whoami?.ppid}`)
 
-  // 触发 os._exit(7)
+  // Triggers os._exit(7).
   let crashThrew = false
   try {
     await tools.get('crash_me').execute({})
   } catch {
     crashThrew = true
   }
-  check('崩溃表现为工具调用失败', crashThrew)
+  check('the crash surfaces as a tool call failure', crashThrew)
 
-  // 等进程退出与清理
+  // Wait for the process exit and the cleanup.
   await new Promise((resolve) => setTimeout(resolve, 800))
-  check('宿主进程存活', true)
+  check('the host process is alive', true)
   const afterCrash = stateOf('faulty')
   check(
-    'faulty 被标记为 failed 或已撤销',
+    'faulty is marked failed or already revoked',
     afterCrash?.state === 'failed' || afterCrash === undefined,
     JSON.stringify(afterCrash),
   )
-  check('崩溃插件的工具已撤销', !tools.schemas().some((s) => s.name === 'whoami'), tools.schemas().map((s) => s.name).join(','))
-  check('其他插件不受影响', stateOf('guarded')?.state === 'applied')
+  check('the crashed plugin tools are revoked', !tools.schemas().some((s) => s.name === 'whoami'), tools.schemas().map((s) => s.name).join(','))
+  check('the other plugins are unaffected', stateOf('guarded')?.state === 'applied')
 
-  section('⑤ 调用超时（不杀进程）')
-  // guarded 只有一个立即可返回的工具；验证超时能力得用其它方式。
-  // 这里直接验证 loader 报告的状态，超时本身在 PythonBackendInstance 层已测。
-  check('超时配置生效（callMs=1500）', true)
+  section('5. Call timeout (the process is not killed)')
+  // guarded only has immediately returning tools; the timeout path itself is covered in PythonBackendInstance.
+  check('the timeout configuration is in effect (callMs=1500)', true)
 
-  section('⑥ loader 卸载后干净收场')
+  section('6. The loader disposes cleanly')
   await loaderFiber.dispose()
   await new Promise((resolve) => setTimeout(resolve, 1000))
   const finalTools = tools.schemas().map((schema) => schema.name)
-  check('所有外部工具已撤销', finalTools.filter((n) => ['legal_tool', 'whoami', 'crash_me'].includes(n)).length === 0, finalTools.join(','))
+  check('every external tool is revoked', finalTools.filter((n) => ['legal_tool', 'whoami', 'crash_me'].includes(n)).length === 0, finalTools.join(','))
 
-  console.log(`\n${'─'.repeat(60)}`)
+  console.log('')
   if (failures.length === 0) {
-    console.log(`✅ 全部通过：${passed} 项断言`)
+    console.log(`All ${passed} assertions passed`)
     process.exit(0)
   } else {
-    console.log(`❌ ${failures.length} 项失败 / 共 ${passed + failures.length} 项`)
+    console.log(`${failures.length} of ${passed + failures.length} assertions failed`)
     for (const failure of failures) console.log(`   - ${failure}`)
-    console.log('\n--- 相关日志 ---')
+    console.log('\nRelevant log:')
     for (const line of logger.lines.slice(-50)) console.log(`   ${line}`)
     process.exit(1)
   }
 }
 
 main().catch((error) => {
-  console.error('\n❌ 边界测试脚本崩溃:', error)
+  console.error('\nThe edge case suite crashed:', error)
   process.exit(1)
 })

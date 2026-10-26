@@ -1,10 +1,11 @@
-"""示例插件：声明式风格（风格 B）。
+"""Example plugin: declarative style (style B).
 
-不写 apply，只用 @tool 收集工具表，由 loader 主动注册。
-两种风格可以在同一个 loader 下混用。
+The module has no ``apply`` function. It collects tools with ``@tool`` and the
+runtime registers them during the apply handshake. Both styles may be mixed
+under one loader.
 """
 
-from dsh_runtime import tool
+from dsh_mloader_sdk import tool
 
 NAME = "py-decl"
 
@@ -13,7 +14,7 @@ TOOLS = []
 
 @tool(
     name="py_add",
-    description="两数相加",
+    description="Add two numbers",
     parameters={
         "type": "object",
         "properties": {
@@ -30,7 +31,7 @@ def py_add(args):
 
 @tool(
     name="py_stats",
-    description="计算一组数字的统计量",
+    description="Compute summary statistics for a list of numbers",
     parameters={
         "type": "object",
         "properties": {

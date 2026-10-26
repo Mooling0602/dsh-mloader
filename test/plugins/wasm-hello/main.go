@@ -1,8 +1,9 @@
-// 示例 WASM 插件 —— 用 Go 写，编译到 wasip1。
+// Command wasmhello is an example WebAssembly plugin written in Go and compiled
+// for wasip1.
 //
-// ABI 见 docs/ABI.md §7：core-wasm，宿主通过 dsh_alloc/dsh_call/dsh_result_ptr
-// 交换 JSON。这个文件只依赖 Go 标准库的 unsafe，不依赖任何第三方包。
-
+// The ABI is specified in docs/ABI.md §7: the host exchanges JSON through
+// dsh_alloc, dsh_call and dsh_result_ptr. This file depends only on the Go
+// standard library.
 package main
 
 import (
@@ -10,15 +11,15 @@ import (
 	"unsafe"
 )
 
-// ── 线性内存管理 ──────────────────────────────────────────────────────────
-
+// reqBuf holds the request the host writes. resBuf holds the result the plugin
+// writes and the host reads.
 var (
-	// 请求缓冲区：宿主写入 JSON 请求
 	reqBuf []byte
-	// 结果缓冲区：插件写入 JSON 结果，宿主读取
 	resBuf []byte
 )
 
+// dshAlloc allocates the request buffer and returns its pointer.
+//
 //go:wasmexport dsh_alloc
 func dshAlloc(size uint32) uint32 {
 	reqBuf = make([]byte, size)
@@ -28,11 +29,15 @@ func dshAlloc(size uint32) uint32 {
 	return uint32(uintptr(unsafe.Pointer(&reqBuf[0])))
 }
 
+// dshFree releases the request buffer.
+//
 //go:wasmexport dsh_free
 func dshFree(ptr uint32, size uint32) {
 	reqBuf = nil
 }
 
+// dshResultPtr returns the pointer of the result buffer, or zero when empty.
+//
 //go:wasmexport dsh_result_ptr
 func dshResultPtr() uint32 {
 	if len(resBuf) == 0 {
@@ -41,41 +46,39 @@ func dshResultPtr() uint32 {
 	return uint32(uintptr(unsafe.Pointer(&resBuf[0])))
 }
 
-// ── 协议 ──────────────────────────────────────────────────────────────────
-
+// request is one protocol request.
 type request struct {
 	Op      string          `json:"op"`
 	Payload json.RawMessage `json:"payload"`
 }
 
+// response is one protocol reply.
 type response struct {
 	OK     bool        `json:"ok"`
 	Result interface{} `json:"result,omitempty"`
 	Error  *respError  `json:"error,omitempty"`
 }
 
+// respError is the error object of a failed reply.
 type respError struct {
 	Message string `json:"message"`
 }
 
+// toolCall is the payload of a tool.call request.
 type toolCall struct {
 	Tool string                 `json:"tool"`
 	Args map[string]interface{} `json:"args"`
 }
 
-type registerPayload struct {
-	Tool toolSpec `json:"tool"`
-}
-
+// toolSpec is one tool declaration.
 type toolSpec struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
 	Parameters  map[string]interface{} `json:"parameters"`
 }
 
-// 宿主回调：注册工具（由 loader 通过 host import 处理）
-// 简化做法：把注册意图放进结果里返回，由宿主解析。
-
+// applyResult is the declaration a plugin returns in reply to apply. The host
+// performs the registrations itself, so no host import is needed.
 type applyResult struct {
 	Tools  []toolSpec `json:"tools"`
 	Events []string   `json:"events"`
@@ -83,6 +86,8 @@ type applyResult struct {
 
 var registeredTools []toolSpec
 
+// dshCall handles one protocol request and returns the result length.
+//
 //go:wasmexport dsh_call
 func dshCall(ptr uint32, length uint32) uint32 {
 	raw := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
@@ -93,11 +98,10 @@ func dshCall(ptr uint32, length uint32) uint32 {
 
 	switch req.Op {
 	case "apply":
-		// 声明本插件的工具
 		registeredTools = []toolSpec{
 			{
 				Name:        "wasm_add",
-				Description: "两数相加（WASM 实现）",
+				Description: "Add two numbers (WASM implementation)",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -109,7 +113,7 @@ func dshCall(ptr uint32, length uint32) uint32 {
 			},
 			{
 				Name:        "wasm_upper",
-				Description: "把字符串转成大写（WASM 实现）",
+				Description: "Upper-case a string (WASM implementation)",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -133,6 +137,7 @@ func dshCall(ptr uint32, length uint32) uint32 {
 	}
 }
 
+// callTool dispatches one tool call to its implementation.
 func callTool(name string, args map[string]interface{}) response {
 	switch name {
 	case "wasm_add":
@@ -155,6 +160,7 @@ func callTool(name string, args map[string]interface{}) response {
 	}
 }
 
+// writeResponse stores one reply in the result buffer and returns its length.
 func writeResponse(resp response) uint32 {
 	data, err := json.Marshal(resp)
 	if err != nil {

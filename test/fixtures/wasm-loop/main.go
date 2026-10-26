@@ -1,4 +1,5 @@
-// 故障注入：通过 ABI 进入死循环，验证 worker 能被 terminate。
+// Command wasmloop is a fault injection plugin. One tool enters an infinite loop
+// through the ABI, which proves the host can terminate the worker thread.
 package main
 
 import (
@@ -6,30 +7,45 @@ import (
 	"unsafe"
 )
 
+// reqBuf holds the request the host writes. resBuf holds the result the plugin
+// writes and the host reads.
 var reqBuf, resBuf []byte
 
+// dshAlloc allocates the request buffer and returns its pointer.
+//
 //go:wasmexport dsh_alloc
 func dshAlloc(size uint32) uint32 {
 	reqBuf = make([]byte, size)
-	if size == 0 { return 0 }
+	if size == 0 {
+		return 0
+	}
 	return uint32(uintptr(unsafe.Pointer(&reqBuf[0])))
 }
 
+// dshFree releases the request buffer.
+//
 //go:wasmexport dsh_free
 func dshFree(ptr, size uint32) { reqBuf = nil }
 
+// dshResultPtr returns the pointer of the result buffer, or zero when empty.
+//
 //go:wasmexport dsh_result_ptr
 func dshResultPtr() uint32 {
-	if len(resBuf) == 0 { return 0 }
+	if len(resBuf) == 0 {
+		return 0
+	}
 	return uint32(uintptr(unsafe.Pointer(&resBuf[0])))
 }
 
+// writeJSON stores one JSON reply in the result buffer and returns its length.
 func writeJSON(v interface{}) uint32 {
 	b, _ := json.Marshal(v)
 	resBuf = b
 	return uint32(len(resBuf))
 }
 
+// dshCall handles one protocol request and returns the result length.
+//
 //go:wasmexport dsh_call
 func dshCall(ptr, length uint32) uint32 {
 	raw := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
@@ -47,9 +63,9 @@ func dshCall(ptr, length uint32) uint32 {
 			"ok": true,
 			"result": map[string]interface{}{
 				"tools": []map[string]interface{}{
-					{"name": "wasm_loop_forever", "description": "无限循环（故障注入）",
+					{"name": "wasm_loop_forever", "description": "Infinite loop (fault injection)",
 						"parameters": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}},
-					{"name": "wasm_fine", "description": "正常工具",
+					{"name": "wasm_fine", "description": "Normal tool",
 						"parameters": map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}},
 				},
 				"events": []string{},
@@ -63,7 +79,8 @@ func dshCall(ptr, length uint32) uint32 {
 		}
 		json.Unmarshal(req.Payload, &call)
 		if call.Tool == "wasm_loop_forever" {
-			// ★ 故意死循环：主线程若同步调用，dsh 会永久卡死
+			// The loop only runs on the worker thread, so the host can still
+			// enforce the deadline and terminate the worker.
 			for {
 			}
 		}

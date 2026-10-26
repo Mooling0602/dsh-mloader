@@ -1,36 +1,53 @@
-dsh-mloader —— dsh 多运行时插件码头
+dsh-mloader
 Copyright (C) 2026 木泠
 
-本文件说明本项目的版权归属与许可证适用方式。许可证全文见：
+This file states the copyright and how the licenses apply to this repository. The
+full license texts are:
 
-  LICENSE         GNU LGPL v3（附加条款，GitHub 据此识别为 LGPL-3.0）
-  COPYING         GNU GPL v3 全文（LGPL v3 通过引用纳入其条款）
-  COPYING.LESSER  GNU LGPL v3 附加条款（与 LICENSE 相同，遵循 FSF 惯例）
+  LICENSE         GNU LGPL v3 additional terms (GitHub identifies the project as
+                  LGPL-3.0)
+  COPYING         GNU GPL v3 full text (LGPL v3 incorporates its terms by
+                  reference)
+  COPYING.LESSER  GNU LGPL v3 additional terms (same file as LICENSE, under the
+                  FSF convention name)
 
-LGPL v3 由两部分组成：GPL v3 的全部条款，加上 LGPL 的附加许可。
-两份文件缺一不可，请一并阅读。
+LGPL v3 consists of all of GPL v3 plus the LGPL additional permissions. Both the GPL
+v3 text and the LGPL additional terms apply.
 
-----------------------------------------------------------------------
-关于插件
-----------------------------------------------------------------------
+## Loader license
 
-本许可证只约束码头（loader）自身。通过码头加载的外部插件是独立作品，
-不受本许可证约束 —— 你可以为自己的插件选择任何许可证，包括闭源。
-这是选择 LGPL 而非 GPL 的原因。
+The loader as a whole is licensed under LGPL-3.0-only. Every file outside
+`src/runtime/python_sdk/` carries that license.
 
-src/runtime/dsh_runtime.py 是码头提供给插件的接口（ABI）。插件通过
-`from dsh_runtime import plugin` 使用它，这构成 LGPL 意义上的「使用库
-接口」，不使插件成为衍生作品。
+## Python runtime license
 
-----------------------------------------------------------------------
-依赖
-----------------------------------------------------------------------
+`src/runtime/python_sdk/` is additionally licensed under the MIT license, so that
+the code can be reused by the separate Python SDK package `dsh-mloader-sdk`. Its
+license text is in `src/runtime/python_sdk/LICENSE`. The repository as a whole stays
+LGPL-3.0-only.
 
-本项目依赖的 DeepSeek Harness 及其组件均为 MIT 许可证：
+## External plugins
+
+External plugins loaded by the loader are independent works and are not covered by
+this license. You may license your plugin under any terms, including proprietary
+terms. Importing the loader's Python runtime from a plugin does not make the plugin
+a derivative work of the loader.
+
+## Dependencies
+
+The loader has no runtime dependencies. It uses components of DeepSeek Harness,
+which are MIT licensed:
 
   @deepseek-ai/dsh            MIT
   @deepseek-ai/cordis         MIT
   @deepseek-ai/dsh-tools      MIT
   @deepseek-ai/dsh-commands   MIT
 
-MIT 与 LGPL-3.0 兼容。本项目不包含上述软件的任何代码副本。
+MIT is compatible with LGPL-3.0. This repository contains no copy of that software
+and uses it only through imports.
+
+TypeScript and `@types/node` are development-only dependencies. TypeScript is
+licensed under Apache-2.0 and is required only to build the committed JavaScript
+artifacts. `@types/node` is licensed under MIT and supplies type declarations for the
+Node.js API used during that build. Neither package is distributed as part of the
+loader at runtime.

@@ -1,29 +1,12 @@
 /**
- * ★ 回归测试：dsh 的 exec 对象能安全跨进程（2026-10-26 事故）
+ * Regression test: host objects cross the process boundary safely.
  *
- * 事故现象（非常迷惑人）：
- *   - 插件的工具**注册成功**（`mloader_status` 能看到它们）
- *   - `mloader_status` **立刻返回**（它是宿主直接注册的，不过子进程）
- *   - 但插件的每个工具都卡到 callMs 超时：`tool.call timed out after 15000ms`
- *   - 子进程活着、CPU/IO 全平（`/proc/<pid>/io` 的 rchar/wchar 一动不动）
- *   - 同一个插件在 dsh 外单独驱动时完全正常
- *
- * 根因：
- *   `tools/execute` 是 Cordis 的 waterfall，监听器收到的首参是**活的 exec 对象**：
- *     { callId, name, arguments, agent: <Agent>, signal: <AbortSignal>, … }
- *   `agent` 带着 ctx → fiber → scope 的环。宿主把它原样 `JSON.stringify` 写进
- *   子进程 stdin，抛 `Converting circular structure to JSON`。
- *
- *   真正的杀手是：当时 `#write` 把「序列化失败」和「对端已关闭」共用一个 catch，
- *   于是序列化失败也置 `stdinBroken = true` —— **之后每一帧都被静默丢弃**。
- *   第一次工具调用触发的 `tools/execute` 事件毒死了整条通道，
- *   此后所有 `tool.call` 都发不出去，只能等满 callMs。
- *
- * 本测试断言四件事：
- *   ① 带环 + AbortSignal 的载荷能安全跨进程（不抛错、不毒通道）
- *   ② ★ 事件之后，工具调用仍然正常（这是事故的直接症状）
- *   ③ 插件收到的载荷是投影后的纯数据（不是原样的宿主对象）
- *   ④ 单帧序列化失败不会永久关闭通道（隔离性）
+ * The properties asserted here:
+ *   1. A payload with a reference cycle and an AbortSignal serialises through
+ *      the projection instead of throwing.
+ *   2. A tool call still works after a dirty event payload was delivered.
+ *   3. The plugin receives projected plain data, not live host objects.
+ *   4. One frame that cannot be serialised does not close the channel.
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -42,10 +25,10 @@ let passed = 0
 function check(name, condition, detail = '') {
   if (condition) {
     passed++
-    console.log(`  ✓ ${name}`)
+    console.log(`  ok   ${name}`)
   } else {
-    failures.push(`${name}${detail ? ` — ${detail}` : ''}`)
-    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`)
+    failures.push(detail ? `${name} [${detail}]` : name)
+    console.log(`  FAIL ${name}${detail ? ` [${detail}]` : ''}`)
   }
 }
 
@@ -66,22 +49,24 @@ function makeLogger() {
 function withTimeout(promise, ms, label) {
   let timer = null
   const guard = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} 超过 ${ms}ms 未返回 —— 通道疑似被毒死`)), ms)
+    timer = setTimeout(
+      () => reject(new Error(`${label} did not return within ${ms}ms; the channel looks broken`)),
+      ms,
+    )
   })
   return Promise.race([promise, guard]).finally(() => clearTimeout(timer))
 }
 
 /**
- * 造一个**结构和 dsh 真实 exec 一样危险**的对象：
- *   - agent 有环（agent.self → agent）
- *   - signal 是真正的宿主 AbortSignal（有内部槽，不能 stringify）
- *   - 含函数、含 undefined、含超深嵌套
+ * Build a payload as dangerous as the real dsh exec object: a cyclic agent
+ * tree, a real AbortSignal, a function and a value deeper than the projection
+ * limit.
  */
 function makeHostileExec() {
   const controller = new AbortController()
   const agent = { id: 'agent-1', name: 'main', kind: 'root' }
   agent.self = agent
-  agent.ctx = { fiber: { scope: { agent } } } // 又一条环
+  agent.ctx = { fiber: { scope: { agent } } }
   return {
     callId: 'call-1',
     name: 'exec_ping',
@@ -94,8 +79,7 @@ function makeHostileExec() {
 }
 
 async function main() {
-  // ── ① 纯单元：投影函数本身 ────────────────────────────────────────────
-  section('① 投影函数：环 / AbortSignal / 函数 / 深度')
+  section('1. Projection: cycles, AbortSignal, functions and depth')
 
   const hostile = makeHostileExec()
   let projected
@@ -105,7 +89,7 @@ async function main() {
   } catch (error) {
     serializeError = error
   }
-  check('投影不抛错', serializeError === null, serializeError?.message)
+  check('projection does not throw', serializeError === null, serializeError?.message)
 
   let jsonText = null
   try {
@@ -113,8 +97,8 @@ async function main() {
   } catch (error) {
     serializeError = error
   }
-  check('★ 投影结果可 JSON.stringify（修复前这里抛 Converting circular）', jsonText !== null, serializeError?.message)
-  check('投影结果可被 structuredClone（worker 通道要求）', (() => {
+  check('projected value can be JSON.stringify-ed', jsonText !== null, serializeError?.message)
+  check('projected value can be structuredClone-d', (() => {
     try {
       structuredClone(projected)
       return true
@@ -131,24 +115,23 @@ async function main() {
       return false
     }
   })()
-  check('对照：原始对象确实不可序列化（夹具有效）', plainJson === false)
+  check('control: the raw object is not serialisable (fixture is dangerous)', plainJson === false)
 
   const agentProjection = projected.agent
-  check('环被标记为 [Circular]', agentProjection?.self === '[Circular]', JSON.stringify(agentProjection))
-  check('AbortSignal 被投影成 $type', projected.signal?.$type === 'AbortSignal', JSON.stringify(projected.signal))
-  check('AbortSignal 带上 aborted 状态', projected.signal?.aborted === false, JSON.stringify(projected.signal))
-  check('函数被标记而非丢弃', projected.fn === '[Function]', JSON.stringify(projected.fn))
-  check('超深嵌套被截断', JSON.stringify(projected.nested).includes('MaxDepth'), JSON.stringify(projected.nested))
+  check('cycle is marked as [Circular]', agentProjection?.self === '[Circular]', JSON.stringify(agentProjection))
+  check('AbortSignal is projected to a $type', projected.signal?.$type === 'AbortSignal', JSON.stringify(projected.signal))
+  check('AbortSignal keeps the aborted state', projected.signal?.aborted === false, JSON.stringify(projected.signal))
+  check('function is marked instead of dropped', projected.fn === '[Function]', JSON.stringify(projected.fn))
+  check('excessive depth is truncated', JSON.stringify(projected.nested).includes('MaxDepth'), JSON.stringify(projected.nested))
 
-  // 敌意宿主对象：投影本身绝不能抛，否则「投影」这道防线就是空的
   const { proxy: revoked, revoke } = Proxy.revocable({}, {})
   revoke()
   const hostileHostObjects = {
     'revoked proxy': revoked,
-    '抛错的 getter': { get boom() { throw new Error('nope') } },
-    'ownKeys 抛错的 proxy': new Proxy({}, { ownKeys() { throw new Error('keys') } }),
-    'NaN / Infinity': { a: NaN, b: Infinity },
-    'Symbol 键': { [Symbol('s')]: 1, a: 2 },
+    'throwing getter': { get boom() { throw new Error('nope') } },
+    'proxy with throwing ownKeys': new Proxy({}, { ownKeys() { throw new Error('keys') } }),
+    'NaN and Infinity': { a: NaN, b: Infinity },
+    'symbol key': { [Symbol('s')]: 1, a: 2 },
   }
   for (const [label, value] of Object.entries(hostileHostObjects)) {
     let ok = true
@@ -159,21 +142,20 @@ async function main() {
       ok = false
       snapshot = error.message
     }
-    check(`敌意对象不炸投影：${label}`, ok, snapshot?.slice(0, 120))
+    check(`projection survives ${label}`, ok, snapshot?.slice(0, 120))
   }
 
-  // exec 专用投影：不把整棵 agent 树塞给插件
   const execProjection = projectToolExecution(hostile)
-  check('exec 投影保留 name', execProjection.name === 'exec_ping', JSON.stringify(execProjection))
-  check('exec 投影保留 arguments', execProjection.arguments?.marker === 'first', JSON.stringify(execProjection))
-  check('exec 投影带上 $type', execProjection.$type === 'ToolExecution', JSON.stringify(execProjection))
+  check('exec projection keeps the name', execProjection.name === 'exec_ping', JSON.stringify(execProjection))
+  check('exec projection keeps the arguments', execProjection.arguments?.marker === 'first', JSON.stringify(execProjection))
+  check('exec projection carries $type', execProjection.$type === 'ToolExecution', JSON.stringify(execProjection))
   check(
-    'exec 投影不暴露整棵 agent 树（只有少数白名单字段）',
+    'exec projection does not expose the agent tree',
     Object.keys(execProjection.agent ?? {}).length <= 4,
     JSON.stringify(execProjection.agent),
   )
-  check('exec 投影不含可用 signal 对象', execProjection.signal === undefined, JSON.stringify(execProjection.signal))
-  check('exec 投影可 JSON.stringify', (() => {
+  check('exec projection has no usable signal object', execProjection.signal === undefined, JSON.stringify(execProjection.signal))
+  check('exec projection can be JSON.stringify-ed', (() => {
     try {
       JSON.stringify(execProjection)
       return true
@@ -181,13 +163,13 @@ async function main() {
       return false
     }
   })())
-  check(`exec 投影远小于通用投影（深度上限 ${MAX_DEPTH}）`, JSON.stringify(execProjection).length < 2000,
+  check(`exec projection is far smaller than the generic one (depth limit ${MAX_DEPTH})`, JSON.stringify(execProjection).length < 2000,
     `${JSON.stringify(execProjection).length} chars`)
 
   const projectedArgs = projectEventArgs('tools/execute', [hostile, 'tail'])
-  check('projectEventArgs 处理首参为 exec', projectedArgs[0]?.$type === 'ToolExecution', JSON.stringify(projectedArgs[0]))
-  check('projectEventArgs 保留后续参数', projectedArgs[1] === 'tail', JSON.stringify(projectedArgs[1]))
-  check('projectEventArgs 结果可序列化', (() => {
+  check('projectEventArgs projects the first argument as an exec', projectedArgs[0]?.$type === 'ToolExecution', JSON.stringify(projectedArgs[0]))
+  check('projectEventArgs keeps later arguments', projectedArgs[1] === 'tail', JSON.stringify(projectedArgs[1]))
+  check('projectEventArgs result is serialisable', (() => {
     try {
       JSON.stringify(projectedArgs)
       return true
@@ -196,8 +178,7 @@ async function main() {
     }
   })())
 
-  // ── ② 端到端：真实 Python 子进程 + 真实 waterfall ─────────────────────
-  section('② 真实 Python 子进程：脏载荷之后工具仍然可用（★ 事故症状）')
+  section('2. Real Python subprocess: tools still work after a dirty payload')
 
   const root = new Context()
   const logger = makeLogger()
@@ -224,21 +205,18 @@ async function main() {
   await new Promise((resolve) => setTimeout(resolve, 3000))
 
   const loader = root.get('mloader')
-  const record = loader?.list().find((p) => p.id === 'py-exec-observer')
-  check('夹具插件 applied', record?.state === 'applied', JSON.stringify(record))
-  check('订阅了 tools/execute', (record?.events ?? []).includes('tools/execute'), JSON.stringify(record?.events))
+  const record = loader?.list().find((plugin) => plugin.id === 'py-exec-observer')
+  check('fixture plugin is applied', record?.state === 'applied', JSON.stringify(record))
+  check('fixture subscribes to tools/execute', (record?.events ?? []).includes('tools/execute'), JSON.stringify(record?.events))
 
-  // 先证明通道是好的
   const tools = root.get('tools')
   const pingDef = tools.get('exec_ping')
-  check('exec_ping 已注册', pingDef !== undefined)
-  check('exec_describe 已注册', tools.get('exec_describe') !== undefined)
+  check('exec_ping is registered', pingDef !== undefined)
+  check('exec_describe is registered', tools.get('exec_describe') !== undefined)
 
   const before = await withTimeout(pingDef.execute({ marker: 'before' }), 8000, 'exec_ping(before)')
-  check('事件触发前工具可用', before?.marker === 'before', JSON.stringify(before)?.slice(0, 300))
+  check('tool works before the event is triggered', before?.marker === 'before', JSON.stringify(before)?.slice(0, 300))
 
-  // ★ 关键一步：用真实的 hostile exec 触发 waterfall。
-  // 修复前，这一行会让标准化失败 → stdinBroken → 后续所有 tool.call 静默丢弃。
   const hostileExec = makeHostileExec()
   let dispatchError = null
   let chainResult
@@ -251,13 +229,11 @@ async function main() {
   } catch (error) {
     dispatchError = error
   }
-  check('★ 带环 exec 的 waterfall 不抛错（修复前抛 Converting circular）', dispatchError === null, dispatchError?.message)
-  check('执行链完整（返回 body 的结果）', chainResult === 'body-result', JSON.stringify(chainResult))
+  check('waterfall with a cyclic exec does not throw', dispatchError === null, dispatchError?.message)
+  check('chain is intact (body result returned)', chainResult === 'body-result', JSON.stringify(chainResult))
 
-  // 给异步投递一点时间落地
   await new Promise((resolve) => setTimeout(resolve, 500))
 
-  // ★★★ 这就是事故的直接症状：事件之后工具必须还能用。
   let after
   let afterError = null
   const t0 = Date.now()
@@ -268,16 +244,11 @@ async function main() {
   }
   const elapsed = Date.now() - t0
 
-  check(
-    '★★ 脏载荷之后工具调用仍然成功（修复前：15s 超时）',
-    afterError === null,
-    afterError?.message,
-  )
-  check('★★ 工具返回内容正确', after?.marker === 'after', JSON.stringify(after)?.slice(0, 300))
-  check('★★ 耗时是毫秒级而非等满 callMs', elapsed < 2000, `${elapsed}ms`)
+  check('tool call still succeeds after the dirty payload', afterError === null, afterError?.message)
+  check('tool returns the right content', after?.marker === 'after', JSON.stringify(after)?.slice(0, 300))
+  check('call takes milliseconds instead of the call timeout', elapsed < 2000, `${elapsed}ms`)
 
-  // ── ③ 插件侧收到的载荷形状 ───────────────────────────────────────────
-  section('③ 插件收到的载荷是投影后的纯数据')
+  section('3. The plugin receives projected plain data')
 
   let describe
   let describeError = null
@@ -286,34 +257,32 @@ async function main() {
   } catch (error) {
     describeError = error
   }
-  check('exec_describe 调用成功', describeError === null, describeError?.message)
+  check('exec_describe call succeeds', describeError === null, describeError?.message)
 
   const received = describe?.received
-  check('插件确实收到了事件（不是静默丢弃）', Array.isArray(received) && received.length > 0,
+  check('plugin actually received the event', Array.isArray(received) && received.length > 0,
     JSON.stringify(received)?.slice(0, 300))
 
   const first = Array.isArray(received) ? received[0] : undefined
-  check('插件收到的首参带 $type=ToolExecution', first?.$type === 'ToolExecution', JSON.stringify(first)?.slice(0, 300))
-  check('插件收到的 name 正确', first?.name === 'exec_ping', JSON.stringify(first?.name))
-  check('插件收到的 arguments 正确', first?.arguments?.marker === 'first', JSON.stringify(first?.arguments))
+  check('first received argument carries $type=ToolExecution', first?.$type === 'ToolExecution', JSON.stringify(first)?.slice(0, 300))
+  check('received name is correct', first?.name === 'exec_ping', JSON.stringify(first?.name))
+  check('received arguments are correct', first?.arguments?.marker === 'first', JSON.stringify(first?.arguments))
   check(
-    '★ 插件没收到活的宿主对象（无环、无函数、无 AbortSignal 实例）',
+    'plugin did not receive a live host object',
     isPlainData(first),
     JSON.stringify(first)?.slice(0, 400),
   )
 
-  // ── ④ 通道隔离性 ─────────────────────────────────────────────────────
-  section('④ 单帧失败不关闭通道')
+  section('4. One failed frame does not close the channel')
 
-  const stillApplied = loader.list().find((p) => p.id === 'py-exec-observer')
-  check('夹具仍在 applied 状态（没被副作用搞崩）', stillApplied?.state === 'applied', JSON.stringify(stillApplied))
+  const stillApplied = loader.list().find((plugin) => plugin.id === 'py-exec-observer')
+  check('fixture is still applied', stillApplied?.state === 'applied', JSON.stringify(stillApplied))
   check(
-    '事件订阅仍然有效（没被卸载）',
+    'event subscription is still active',
     (stillApplied?.events ?? []).includes('tools/execute'),
     JSON.stringify(stillApplied?.events),
   )
 
-  // 再触发一次，确认可重复
   let repeat
   let repeatError = null
   try {
@@ -321,21 +290,20 @@ async function main() {
   } catch (error) {
     repeatError = error
   }
-  check('重复调用仍正常（通道可复用）', repeatError === null && repeat?.marker === 'repeat',
+  check('repeated call still works (channel is reusable)', repeatError === null && repeat?.marker === 'repeat',
     repeatError?.message ?? JSON.stringify(repeat)?.slice(0, 300))
 
-  // ── 汇总 ─────────────────────────────────────────────────────────────
   console.log('')
   if (failures.length === 0) {
-    console.log(`✅ 全部通过：${passed} 项断言`)
+    console.log(`PASS: ${passed} assertions`)
   } else {
-    console.log(`❌ ${failures.length} 项失败（共 ${passed + failures.length} 项）：`)
+    console.log(`FAIL: ${failures.length} of ${passed + failures.length} assertions`)
     for (const failure of failures) console.log(`  - ${failure}`)
     process.exitCode = 1
   }
 }
 
-/** 断言一个值里没有环、没有函数、没有 AbortSignal 实例。 */
+/** Assert that a value has no cycle, no function and no live AbortSignal. */
 function isPlainData(value, seen = new Set()) {
   if (value === null || value === undefined) return true
   const type = typeof value
@@ -355,7 +323,7 @@ function isPlainData(value, seen = new Set()) {
 main().then(
   () => process.exit(process.exitCode ?? 0),
   (error) => {
-    console.error('\n测试自身异常：', error)
+    console.error('\nTest script crashed:', error)
     process.exit(1)
   },
 )

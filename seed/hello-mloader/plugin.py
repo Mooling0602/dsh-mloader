@@ -1,65 +1,63 @@
-"""dsh-mloader 内置示例插件。
+"""Bundled example plugin for dsh-mloader.
 
-这是码头释放到 `<profile>/mloader/plugins/hello-mloader/` 的参考实现。
-你可以直接改它，码头不会覆盖你的改动（目录已存在就整体跳过）。
+The loader releases this directory into ``<profile>/mloader/plugins/`` on first
+start. Edit it freely: the loader skips a plugin directory that already exists
+and never overwrites your changes.
 
-目录里就两个文件：
-  mloader.plugin.json   ← 元数据（id / backend / entry / 超时）
-  plugin.py             ← 本文件
+The directory holds two files:
 
-────────────────────────────────────────────────────────────────────
-它演示了三件事
-────────────────────────────────────────────────────────────────────
-1. 注册工具       —— ctx.tools.register(...)
-2. 订阅事件       —— ctx.on("tools/execute")
-3. 注册清理逻辑   —— ctx.effect.register(...)
+``mloader.plugin.json``
+    Metadata: id, backend, entry and timeouts.
+``plugin.py``
+    This file.
 
-────────────────────────────────────────────────────────────────────
-两条必须知道的规则（都是真实事故换来的）
-────────────────────────────────────────────────────────────────────
-① 插件里的任何代码都**不要阻塞**
-   你的代码跑在独立子进程里，但事件回调是**同步等待**的。回调里如果
-   死循环或长时间 sleep，会拖住 dsh 的事件分发，进而拖慢所有工具调用。
+The plugin demonstrates three capabilities of the runtime:
 
-② 事件回调里**不要 await 宿主**
-   回调期间宿主正阻塞在事件分发上、没在读你的 stdin。此时任何
-   "发请求并等回包" 的操作都会和宿主互等，最终死锁。
-   日志是例外：ctx.logger 是单向的，不等回包，可以随便用。
+1. Registering tools with ``ctx.tools.register``.
+2. Subscribing to host events with ``ctx.on``.
+3. Registering cleanup work with ``ctx.effect.register``.
+
+Two rules apply to every handler:
+
+- A handler must return immediately. Event handlers run while the host is busy,
+  so a blocking handler slows down every tool call.
+- A handler must not wait for a host request. The host is not reading plugin
+  requests during event dispatch, so a synchronous host request from inside a
+  handler deadlocks both sides. Logging is the exception: it is a one way
+  notification that never waits for a reply.
 """
 
-from dsh_runtime import plugin
+from dsh_mloader_sdk import plugin
 
-# 元数据里也有 name；这里可省略。写上便于文件单独阅读。
 NAME = "hello-mloader"
 
 
 @plugin
 def apply(ctx):
-    """插件入口。码头启动时会调用一次，这里注册的东西在卸载时自动撤销。"""
+    """Register the example capabilities.
 
-    ctx.logger.info("hello-mloader 已挂载（这是内置示例插件，欢迎改它）")
+    The runtime calls this function once during startup. Every registration is
+    tracked by the loader and revoked in reverse order when the plugin unloads,
+    so this file never has to revoke anything itself.
 
-    # ───────────────────────────────────────────────────────────────
-    # 1. 注册一个工具
-    #
-    # parameters 是 JSON Schema 的**子集**，支持：
-    #   type / properties / required / additionalProperties / items
-    #   enum / const / oneOf / description / title / default / examples
-    # 不支持 format —— 用了会被码头拒绝并让本插件加载失败。
-    # ───────────────────────────────────────────────────────────────
+    :param ctx: The capability context handed to the plugin.
+    """
+
+    ctx.logger.info("hello-mloader mounted; this example is yours to edit")
+
     @ctx.tools.register(
         name="hello_mloader",
-        description="内置示例工具：向指定的人问好，并回显码头信息。",
+        description="Greet someone and echo the plugin identity.",
         parameters={
             "type": "object",
             "properties": {
                 "who": {
                     "type": "string",
-                    "description": "要问候的人或事物",
+                    "description": "Person or thing to greet.",
                 },
                 "excited": {
                     "type": "boolean",
-                    "description": "是否使用感叹号",
+                    "description": "End the greeting with an exclamation mark.",
                     "default": False,
                 },
             },
@@ -68,58 +66,67 @@ def apply(ctx):
         },
     )
     def hello_mloader(args):
+        """Greet the requested target.
+
+        :param args: Tool arguments with a string ``who`` and an optional
+            boolean ``excited``.
+        :type args: dict
+        :returns: The greeting, the plugin identity and a hint that points at
+            this example file.
+        :rtype: dict
+        """
         who = args["who"]
-        mark = "！" if args.get("excited") else "。"
+        mark = "!" if args.get("excited") else "."
         return {
-            "message": f"你好，{who}{mark}",
+            "message": f"Hello, {who}{mark}",
             "plugin": NAME,
-            "hint": "这个工具来自内置示例插件，代码在 profile 的 mloader/plugins/hello-mloader/plugin.py",
+            "hint": (
+                "This tool comes from the bundled example plugin at "
+                "mloader/plugins/hello-mloader/plugin.py in the profile."
+            ),
         }
 
-    # ───────────────────────────────────────────────────────────────
-    # 2. 注册第二个工具：演示"有返回值形状要求"的用法
-    #
-    # 返回值必须是 JSON 可序列化对象。抛异常时码头会把错误回给调用方，
-    # 不会让插件进程崩溃。
-    # ───────────────────────────────────────────────────────────────
     @ctx.tools.register(
         name="hello_add",
-        description="内置示例工具：把两个数字相加（演示必填参数与类型校验）。",
+        description="Add two numbers, demonstrating required parameters and type validation.",
         parameters={
             "type": "object",
             "properties": {
-                "a": {"type": "number", "description": "第一个加数"},
-                "b": {"type": "number", "description": "第二个加数"},
+                "a": {"type": "number", "description": "First addend."},
+                "b": {"type": "number", "description": "Second addend."},
             },
             "required": ["a", "b"],
             "additionalProperties": False,
         },
     )
     def hello_add(args):
-        total = args["a"] + args["b"]
-        return {"a": args["a"], "b": args["b"], "sum": total}
+        """Add the two requested numbers.
 
-    # ───────────────────────────────────────────────────────────────
-    # 3. 订阅事件
-    #
-    # 可用事件见 docs/ABI.md §3.1 的白名单，例如：
-    #   tools/execute, tools/pre-execute, tools/post-execute,
-    #   tools/result, tools/change,
-    #   agent/status, agent/created, agent/disposed,
-    #   session/created, session/disposed
-    #
-    # ★ 回调必须立刻返回，不能 await 宿主（见文件顶部规则 ②）。
-    #   这里只用单向的 logger，所以是安全的。
-    # ───────────────────────────────────────────────────────────────
+        :param args: Tool arguments with numeric ``a`` and ``b``.
+        :type args: dict
+        :returns: Both addends and their sum.
+        :rtype: dict
+        """
+        return {"a": args["a"], "b": args["b"], "sum": args["a"] + args["b"]}
+
     @ctx.on("tools/execute")
     def on_tool_execute(payload):
-        # logger 是单向的：不等回包，所以在事件回调里调用也不会死锁。
-        ctx.logger.debug(f"hello-mloader 观察到工具执行：{payload}")
+        """Log one observed tool execution.
 
-    # ───────────────────────────────────────────────────────────────
-    # 4. 注册清理逻辑
-    #
-    # 插件被卸载（reload / dsh 退出）时执行。适合关文件、断开连接。
-    # 这里只打一行日志，证明它确实被调用了。
-    # ───────────────────────────────────────────────────────────────
-    ctx.effect.register("hello-mloader-cleanup", lambda: ctx.logger.info("hello-mloader 正在卸载"))
+        Logging is a one way notification, so it is safe here. The handler
+        returns immediately and never waits for the host.
+
+        :param payload: Projected tool execution data sent by the host.
+        :type payload: dict
+        """
+        ctx.logger.debug(f"hello-mloader observed a tool execution: {payload}")
+
+    def cleanup():
+        """Report that the plugin is unloading.
+
+        The loader calls this function once when the plugin is disposed. A real
+        plugin would close files or connections here.
+        """
+        ctx.logger.info("hello-mloader is unloading")
+
+    ctx.effect.register("hello-mloader-cleanup", cleanup)

@@ -1,22 +1,11 @@
 /**
- * ★ 端到端死锁回归测试（真实 Python 子进程 + 真实 Cordis waterfall）
+ * End-to-end deadlock regression: a real Python plugin process, a real Cordis
+ * waterfall and a plugin handler that calls back into the host.
  *
- * 事故背景（2026-10-26）：
- *   py-hello 订阅了 tools/execute，并在事件处理器里调 ctx.logger.debug。
- *   当时 listener 写成 `async (...args) => await dispatchEvent(...)`，而 Cordis 的
- *   waterfall 会 await listener 的返回值，于是宿主阻塞在「等插件事件回包」；
- *   插件同时同步等 logger 的 RPC 回包 → 永久互等 → tools 通道占满 →
- *   dsh 所有工具调用（含 bash）全部超时，只能重启。
- *
- * 本测试用真实的 Python 插件子进程复现该场景：
- *   - 插件订阅 tools/execute，处理器内部回调宿主（ctx.logger）
- *   - 宿主走真实 root.waterfall()（带真实的 next 链）
- * 断言：
- *   1. waterfall 返回 body 的结果（执行链完整，没被吞成 undefined）
- *   2. waterfall 在毫秒级返回（没被插件阻塞）
- *   3. 插件确实收到了事件（异步投递成功，不是静默丢弃）
- *   4. 工具调用正常
- *   5. 连续触发不累积阻塞
+ * The assertions are: the waterfall returns the execution body result, it
+ * returns within milliseconds, the plugin really received the event, tool calls
+ * work, repeated delivery does not accumulate blocking, and unload leaves no
+ * registrations behind.
  */
 
 import { Context } from '@deepseek-ai/cordis'
@@ -28,15 +17,27 @@ let passed = 0
 
 function check(name, condition, detail = '') {
   if (condition) {
-    passed++
-    console.log(`  ✓ ${name}`)
+    passed += 1
+    console.log(`  ok: ${name}`)
   } else {
-    failures.push(`${name}${detail ? ` — ${detail}` : ''}`)
-    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`)
+    failures.push(`${name}${detail ? `: ${detail}` : ''}`)
+    console.log(`  FAIL: ${name}${detail ? `: ${detail}` : ''}`)
   }
 }
 
 const section = (title) => console.log(`\n${title}`)
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Poll until the predicate holds, so a fixed sleep cannot hide a timing bug. */
+async function waitFor(label, predicate, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await sleep(100)
+  }
+  throw new Error(`${label} did not become true within ${timeoutMs}ms`)
+}
 
 function makeLogger() {
   const lines = []
@@ -50,11 +51,11 @@ function makeLogger() {
   return logger
 }
 
-/** 超时保护：测试自己不能挂死，否则看不出是被测代码死锁还是测试写错。 */
+/** Guard against a test that hangs, which would hide which side deadlocked. */
 function withTimeout(promise, ms, label) {
   let timer = null
   const guard = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`${label} 超过 ${ms}ms 未返回 —— 疑似死锁`)), ms)
+    timer = setTimeout(() => reject(new Error(`${label} did not settle within ${ms}ms; possible deadlock`)), ms)
   })
   return Promise.race([promise, guard]).finally(() => clearTimeout(timer))
 }
@@ -75,7 +76,7 @@ async function main() {
     assemble: async () => ({ sections: [] }),
   })
   root.plugin(ToolRuntime, {})
-  await new Promise((resolve) => setTimeout(resolve, 200))
+  await sleep(200)
   const tools = root.get('tools')
 
   const roots = [new URL('./deadlock', import.meta.url).pathname]
@@ -83,20 +84,29 @@ async function main() {
     { name: 'dsh-mloader', inject: ['tools'], apply: loaderApply },
     { roots, pythonBin: 'python3', profilePlugins: false, seedExamples: false, console: false },
   )
-  await new Promise((resolve) => setTimeout(resolve, 3000))
+  const loader = () => root.get('mloader')
+  await waitFor(
+    'py-reentrant mount',
+    () => {
+      const plugin = loader()?.list().find((entry) => entry.id === 'py-reentrant')
+      return plugin !== undefined && plugin.state !== 'loaded' && plugin.state !== 'discovered'
+    },
+  )
+  const plugin = loader().list().find((entry) => entry.id === 'py-reentrant')
 
-  const loader = root.get('mloader')
-  const plugin = loader.list().find((p) => p.id === 'py-reentrant')
-
-  section('① 复现夹具已挂载（真实 Python 子进程）')
+  section('1. Fixture is mounted as a real Python subprocess')
   check('py-reentrant applied', plugin?.state === 'applied', JSON.stringify(plugin))
-  check('订阅了 tools/execute', (plugin?.events ?? []).includes('tools/execute'), JSON.stringify(plugin?.events))
+  check(
+    'subscribed to tools/execute',
+    (plugin?.events ?? []).includes('tools/execute'),
+    JSON.stringify(plugin?.events),
+  )
 
-  section('② ★ 真实 waterfall：执行链完整且未被插件阻塞')
+  section('2. Real waterfall: execution chain complete and not blocked by the plugin')
   const beats = { count: 0 }
   const heartbeat = setInterval(() => { beats.count += 1 }, 20)
 
-  const t0 = Date.now()
+  const startedAt = Date.now()
   let waterfallResult
   let waterfallError = null
   try {
@@ -105,80 +115,82 @@ async function main() {
       4000,
       'waterfall(tools/execute)',
     )
-  } catch (err) {
-    waterfallError = err
+  } catch (error) {
+    waterfallError = error
   }
-  const elapsed = Date.now() - t0
+  const elapsed = Date.now() - startedAt
 
-  check('未死锁', waterfallError === null, waterfallError?.message)
-  check('返回 body 的结果（执行链完整）', waterfallResult === 'body-result', JSON.stringify(waterfallResult))
-  check('毫秒级返回，未被插件阻塞（<500ms）', elapsed < 500, `${elapsed}ms`)
+  check('waterfall did not deadlock', waterfallError === null, waterfallError?.message)
+  check('waterfall returned the body result', waterfallResult === 'body-result', JSON.stringify(waterfallResult))
+  check('waterfall returned in milliseconds (<500ms)', elapsed < 500, `${elapsed}ms`)
 
-  section('③ 插件确实收到事件（异步投递，非静默丢弃）')
-  await new Promise((resolve) => setTimeout(resolve, 600))
-  const echoes = logger.lines.filter((line) => line.includes('事件回显'))
-  check('插件在事件处理器内成功回调宿主', echoes.length > 0, `条数=${echoes.length}`)
+  section('3. The plugin received the event and answered the host callback')
+  await sleep(600)
+  const echoes = logger.lines.filter((line) => line.includes('event echo'))
+  check('plugin called the host from inside the handler', echoes.length > 0, `lines=${echoes.length}`)
   if (echoes.length > 0) console.log(`     ${echoes[echoes.length - 1]}`)
 
-  section('④ 工具调用正常（事件路径没污染 tools 通道）')
+  section('4. Tool calls work while events are delivered')
   let toolResult = null
   let toolError = null
   try {
     toolResult = await withTimeout(tools.get('reentrant_ping').execute({}), 4000, 'reentrant_ping')
-  } catch (err) {
-    toolError = err
+  } catch (error) {
+    toolError = error
   }
-  check('工具调用未死锁', toolError === null, toolError?.message)
-  check('返回值正确', toolResult?.ok === true, JSON.stringify(toolResult))
+  check('tool call did not deadlock', toolError === null, toolError?.message)
+  check('tool call returned the expected value', toolResult?.ok === true, JSON.stringify(toolResult))
 
-  section('⑤ 连续触发不累积阻塞')
+  section('5. Repeated delivery does not accumulate blocking')
   const rounds = []
-  for (let i = 0; i < 5; i += 1) {
+  for (let index = 0; index < 5; index += 1) {
     const start = Date.now()
     try {
       const out = await withTimeout(
-        root.waterfall({}, 'tools/execute', { name: `t${i}` }, async () => `r${i}`),
+        root.waterfall({}, 'tools/execute', { name: `t${index}` }, async () => `r${index}`),
         3000,
-        `waterfall#${i}`,
+        `waterfall#${index}`,
       )
       rounds.push({ out, elapsed: Date.now() - start })
-    } catch (err) {
-      rounds.push({ out: { error: err.message }, elapsed: Date.now() - start })
+    } catch (error) {
+      rounds.push({ out: { error: error.message }, elapsed: Date.now() - start })
     }
   }
   clearInterval(heartbeat)
   check(
-    '5 次 waterfall 全部返回正确结果',
-    rounds.every((r, i) => r.out === `r${i}`),
-    JSON.stringify(rounds.map((r) => r.out)),
+    '5 waterfalls returned the correct results',
+    rounds.every((round, index) => round.out === `r${index}`),
+    JSON.stringify(rounds.map((round) => round.out)),
   )
-  check('5 次都未被阻塞', rounds.every((r) => r.elapsed < 500), rounds.map((r) => `${r.elapsed}ms`).join(','))
-  check('主线程全程有空（心跳）', beats.count >= 10, `beats=${beats.count}`)
+  check(
+    '5 waterfalls were not blocked',
+    rounds.every((round) => round.elapsed < 500),
+    rounds.map((round) => `${round.elapsed}ms`).join(','),
+  )
+  check('the main thread stayed responsive', beats.count >= 10, `beats=${beats.count}`)
 
-  section('⑥ 卸载干净')
+  section('6. Unload is clean')
   await loaderFiber.dispose()
-  await new Promise((resolve) => setTimeout(resolve, 800))
-  const names = tools.schemas().map((s) => s.name)
-  check('无残留工具', names.filter((n) => n.startsWith('reentrant_')).length === 0, names.join(','))
+  await sleep(800)
+  const names = tools.schemas().map((schema) => schema.name)
+  check('no residual tools', names.filter((name) => name.startsWith('reentrant_')).length === 0, names.join(','))
   const afterDispose = await root.waterfall({}, 'tools/execute', { name: 'x' }, async () => 'still-works')
-  check('卸载后 waterfall 仍然完整', afterDispose === 'still-works', JSON.stringify(afterDispose))
+  check('waterfall is still complete after unload', afterDispose === 'still-works', JSON.stringify(afterDispose))
 
-  console.log(`\n${'─'.repeat(60)}`)
   if (failures.length === 0) {
-    console.log(`✅ 全部通过：${passed} 项断言`)
+    console.log(`\nAll passed: ${passed} assertions`)
     process.exit(0)
-  } else {
-    console.log(`❌ ${failures.length} 项失败 / 共 ${passed + failures.length} 项`)
-    for (const failure of failures) console.log(`   - ${failure}`)
-    console.log('\n--- 相关日志 ---')
-    for (const line of logger.lines.filter((l) => l.includes('re-entrant') || l.includes('事件回显')).slice(-20)) {
-      console.log(`   ${line}`)
-    }
-    process.exit(1)
   }
+  console.log(`\n${failures.length} failed out of ${passed + failures.length}`)
+  for (const failure of failures) console.log(`   - ${failure}`)
+  console.log('\nRelated log lines:')
+  for (const line of logger.lines.filter((entry) => entry.includes('reentrant') || entry.includes('event echo')).slice(-20)) {
+    console.log(`   ${line}`)
+  }
+  process.exit(1)
 }
 
 main().catch((error) => {
-  console.error('\n❌ 测试脚本崩溃:', error)
+  console.error('\nTest script failed:', error)
   process.exit(1)
 })

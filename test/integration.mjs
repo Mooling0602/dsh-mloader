@@ -1,13 +1,17 @@
 /**
- * 验证脚本：把 loader 挂到**真实 Cordis** 上，用**真实 dsh Tools 服务**跑完整链路。
+ * Loader integration suite.
  *
- * 不碰 dsh 的 Loader / profile，只验证：
- *   发现 → 启动 Python 子进程 → 翻译成注册 → 真实 ctx.tools.register → 工具可调 → 卸载干净
+ * Mounts the loader on a real Cordis context with the real dsh tools service
+ * and drives the whole chain: discovery, Python child process, registration
+ * translation, real tool calls through the tools service and clean unload.
  */
 
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { apply as loaderApply } from '../src/index.js'
+
+/** Greeting the Python hello fixture returns for the `who` argument. */
+const PY_GREETING = 'Hello, world!'
 
 const failures = []
 let passed = 0
@@ -15,10 +19,10 @@ let passed = 0
 function check(name, condition, detail = '') {
   if (condition) {
     passed++
-    console.log(`  ✓ ${name}`)
+    console.log(`  PASS ${name}`)
   } else {
-    failures.push(`${name}${detail ? ` — ${detail}` : ''}`)
-    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`)
+    failures.push(`${name}${detail ? `: ${detail}` : ''}`)
+    console.log(`  FAIL ${name}${detail ? `: ${detail}` : ''}`)
   }
 }
 
@@ -26,7 +30,7 @@ function section(title) {
   console.log(`\n${title}`)
 }
 
-/** 收集日志，便于断言。 */
+/** Collect log lines so assertions can inspect them. */
 function makeLogger() {
   const lines = []
   const push = (level) => (message) => lines.push(`${level}: ${message}`)
@@ -43,9 +47,9 @@ async function main() {
   const root = new Context()
   const logger = makeLogger()
 
-  // 在根上下文提供 logger 与真实 Tools 服务 —— 与 dsh 内部一致。
+  // Provide the logger and the real tools service on the root context, as dsh does.
   root.provide('logger', logger)
-  // ToolRuntime 是真实的 dsh 工具注册服务；它 inject systemPrompt。
+  // ToolRuntime is the real dsh tool registry; it injects systemPrompt.
   root.provide('systemPrompt', {
     section: () => () => {},
     context: () => () => {},
@@ -61,109 +65,110 @@ async function main() {
   await new Promise((resolve) => setTimeout(resolve, 200))
   const tools = root.get('tools')
 
-  section('① 挂载 loader（作为普通 Cordis 插件）')
+  section('1. Mount the loader as an ordinary Cordis plugin')
   const loaderFiber = root.plugin(
     { name: 'dsh-mloader', inject: ['tools'], apply: loaderApply },
     {
       roots: [new URL('./plugins', import.meta.url).pathname],
-      // 测试不该碰真实 profile：显式关掉自动探测与示例释放
+      // The suite must not touch the real profile: disable detection and seeding.
       profilePlugins: false,
-      seedExamples: false, console: false,
+      seedExamples: false,
+      console: false,
       pythonBin: 'python3',
     },
   )
   await new Promise((resolve) => setTimeout(resolve, 2500))
 
   const loader = root.get('mloader')
-  check('loader 提供管理面', typeof loader?.list === 'function')
+  check('loader provides the management service', typeof loader?.list === 'function')
 
   const plugins = loader?.list?.() ?? []
-  // test/plugins 下同时有 Python 与 WASM 插件；这里只关心 Python 那两个。
+  // test/plugins holds both Python and WebAssembly plugins; only the Python ones matter here.
   const pythonPlugins = plugins.filter((plugin) => plugin.backend === 'python')
-  check('发现 2 个 Python 插件', pythonPlugins.length === 2, `实际 ${pythonPlugins.map((p) => p.id).join(',')}`)
+  check('two Python plugins are discovered', pythonPlugins.length === 2, `actual ${pythonPlugins.map((p) => p.id).join(',')}`)
 
   const hello = plugins.find((plugin) => plugin.id === 'py-hello')
   const decl = plugins.find((plugin) => plugin.id === 'py-decl')
-  check('py-hello 已 applied', hello?.state === 'applied', `state=${hello?.state} error=${hello?.error}`)
-  check('py-decl 已 applied', decl?.state === 'applied', `state=${decl?.state} error=${decl?.error}`)
+  check('py-hello is applied', hello?.state === 'applied', `state=${hello?.state} error=${hello?.error}`)
+  check('py-decl is applied', decl?.state === 'applied', `state=${decl?.state} error=${decl?.error}`)
 
-  section('② 外部插件不是 Cordis 插件')
-  check('外部插件未注册为 Cordis 插件', typeof root.get('py-hello') === 'undefined')
-  // loader 是唯一的 Corids 插件节点；外部插件只在注册账本里
-  check('py-hello 有独立的注册账本', (hello?.registrations ?? 0) > 0, `registrations=${hello?.registrations}`)
+  section('2. External plugins are not Cordis plugins')
+  check('external plugins are not registered as Cordis plugins', typeof root.get('py-hello') === 'undefined')
+  // The loader is the only Cordis plugin node; external plugins live in the registrar ledgers.
+  check('py-hello has its own registration ledger', (hello?.registrations ?? 0) > 0, `registrations=${hello?.registrations}`)
 
-  section('③ 工具已注册到真实 Tools 服务')
+  section('3. Tools are registered on the real tools service')
   const schemas = tools.schemas()
   const names = schemas.map((schema) => schema.name)
-  check('py_greet 已注册', names.includes('py_greet'), `现有: ${names.join(',')}`)
-  check('py_echo 已注册', names.includes('py_echo'))
-  check('py_add 已注册（声明式风格）', names.includes('py_add'))
-  check('py_stats 已注册（声明式风格）', names.includes('py_stats'))
-  check('mloader_status 已注册', names.includes('mloader_status'))
+  check('py_greet is registered', names.includes('py_greet'), `present: ${names.join(',')}`)
+  check('py_echo is registered', names.includes('py_echo'))
+  check('py_add is registered (declarative style)', names.includes('py_add'))
+  check('py_stats is registered (declarative style)', names.includes('py_stats'))
+  check('mloader_status is registered', names.includes('mloader_status'))
 
-  section('④ 调用 Python 工具（真实 execute 链路）')
+  section('4. Call Python tools end to end')
   const greetDef = tools.get('py_greet')
-  const greetResult = await greetDef.execute({ who: '世界' })
-  check('py_greet 返回正确', greetResult?.text === '你好，世界！', JSON.stringify(greetResult))
+  const greetResult = await greetDef.execute({ who: 'world' })
+  check('py_greet returns the greeting', greetResult?.text === PY_GREETING, JSON.stringify(greetResult))
 
   const addDef = tools.get('py_add')
   const addResult = await addDef.execute({ a: 19, b: 23 })
-  check('py_add 返回 42', addResult?.sum === 42, JSON.stringify(addResult))
+  check('py_add returns 42', addResult?.sum === 42, JSON.stringify(addResult))
 
   const statsDef = tools.get('py_stats')
   const statsResult = await statsDef.execute({ values: [1, 2, 3, 4] })
-  check('py_stats 计算正确', statsResult?.mean === 2.5 && statsResult?.max === 4, JSON.stringify(statsResult))
+  check('py_stats computes the statistics', statsResult?.mean === 2.5 && statsResult?.max === 4, JSON.stringify(statsResult))
 
-  // 工具抛错必须变成调用错误，而不是杀死进程
-  section('⑤ 错误隔离')
+  // An exception in a tool becomes a tool error and must not kill the process.
+  section('5. Error isolation')
   let threw = false
   try {
     await tools.get('py_stats').execute({ values: 'not-an-array' })
   } catch {
     threw = true
   }
-  check('插件侧异常变成工具错误', threw)
-  check('出错后插件仍然存活', loader.list().find((p) => p.id === 'py-decl')?.state === 'applied')
+  check('a plugin exception becomes a tool error', threw)
+  check('the plugin is still alive after the error', loader.list().find((p) => p.id === 'py-decl')?.state === 'applied')
 
-  section('⑥ 输出渲染')
+  section('6. Output rendering')
   const greetSchema = schemas.find((schema) => schema.name === 'py_greet')
-  check('工具声明了 parameters', greetSchema?.parameters?.type === 'object')
+  check('the tool declares parameters', greetSchema?.parameters?.type === 'object')
   const rendered = greetDef.output.render({ who: 'x' }, greetResult)
-  check('render 返回 ContentBlock[]', Array.isArray(rendered) && rendered[0]?.type === 'text')
+  check('render returns ContentBlock[]', Array.isArray(rendered) && rendered[0]?.type === 'text')
 
-  section('⑦ 状态工具')
+  section('7. Status tool')
   const statusResult = await tools.get('mloader_status').execute({})
-  check('mloader_status 报告全部插件', statusResult?.count === loader.list().length, JSON.stringify(statusResult).slice(0, 200))
+  check('mloader_status reports every plugin', statusResult?.count === loader.list().length, JSON.stringify(statusResult).slice(0, 200))
 
-  section('⑧ 卸载单个插件（不影响其他）')
+  section('8. Unload one plugin without affecting the others')
   await loader.unload('py-decl')
   const afterUnload = loader.list()
-  check('py-decl 已移除', !afterUnload.some((plugin) => plugin.id === 'py-decl'))
+  check('py-decl is removed', !afterUnload.some((plugin) => plugin.id === 'py-decl'))
   const namesAfter = tools.schemas().map((schema) => schema.name)
-  check('py_add 已撤销', !namesAfter.includes('py_add'), `现有: ${namesAfter.join(',')}`)
-  check('py_greet 仍在', namesAfter.includes('py_greet'))
+  check('py_add is revoked', !namesAfter.includes('py_add'), `present: ${namesAfter.join(',')}`)
+  check('py_greet is still registered', namesAfter.includes('py_greet'))
 
-  section('⑨ 卸载 loader（全部撤销 + 子进程退出）')
+  section('9. Dispose the loader (all registrations revoked, child processes exited)')
   await loaderFiber.dispose()
   await new Promise((resolve) => setTimeout(resolve, 800))
   const finalNames = tools.schemas().map((schema) => schema.name)
-  check('所有外部工具已撤销', !finalNames.some((n) => n.startsWith('py_')), `遗留: ${finalNames.join(',')}`)
+  check('every external tool is revoked', !finalNames.some((n) => n.startsWith('py_')), `leftover: ${finalNames.join(',')}`)
 
-  // 总结
-  console.log(`\n${'─'.repeat(60)}`)
+  // Summary
+  console.log('')
   if (failures.length === 0) {
-    console.log(`✅ 全部通过：${passed} 项断言`)
+    console.log(`All ${passed} assertions passed`)
     process.exit(0)
   } else {
-    console.log(`❌ ${failures.length} 项失败 / 共 ${passed + failures.length} 项`)
+    console.log(`${failures.length} of ${passed + failures.length} assertions failed`)
     for (const failure of failures) console.log(`   - ${failure}`)
-    console.log('\n--- loader 日志 ---')
+    console.log('\nLoader log:')
     for (const line of logger.lines.slice(-40)) console.log(`   ${line}`)
     process.exit(1)
   }
 }
 
 main().catch((error) => {
-  console.error('\n❌ 验证脚本本身崩溃:', error)
+  console.error('\nThe integration suite crashed:', error)
   process.exit(1)
 })

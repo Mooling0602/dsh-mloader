@@ -1,50 +1,51 @@
 /**
- * 进程崩溃安全性测试
+ * Crash safety: a plugin process that dies must never take the loader or the
+ * dsh process down.
  *
- * 目标：外部插件的进程死掉时，码头（进而 dsh 主进程）**绝不能跟着崩**。
- *
- * 背景（真实事故）：
- *   dsh 重启时抛出 `fatal uncaught exception: Error: write EPIPE`，
- *   at src/backends/python.js:197 / 218，整个 dsh 进程被杀死。
- *
- *   根因不是"写入失败"，而是**没人监听**：Python 子进程已退出，
- *   往它的 stdin 写会触发**异步** 'error' 事件；EventEmitter 找不到监听器，
- *   就把它升级成 uncaught exception。`#write` 里的 try/catch 挡不住 ——
- *   那是同步异常，EPIPE 是异步的。
- *
- * 本测试用 `process.on('uncaughtException')` 捕获这类逃逸：
- * 只要有任何异常突破到进程级，就判定失败。
+ * The suite installs process level uncaught exception and unhandled rejection
+ * handlers. Any error escaping to that level fails the suite, which is how an
+ * unhandled EPIPE on a dead stdin is caught.
  */
 
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { apply as loaderApply } from '../src/index.js'
-import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
 
 const failures = []
 let passed = 0
 
 function check(name, condition, detail = '') {
   if (condition) {
-    passed++
-    console.log(`  ✓ ${name}`)
+    passed += 1
+    console.log(`  ok: ${name}`)
   } else {
-    failures.push(`${name}${detail ? ` — ${detail}` : ''}`)
-    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`)
+    failures.push(`${name}${detail ? `: ${detail}` : ''}`)
+    console.log(`  FAIL: ${name}${detail ? `: ${detail}` : ''}`)
   }
 }
 
 const section = (title) => console.log(`\n${title}`)
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Poll until the predicate holds, so a fixed sleep cannot hide a timing bug. */
+async function waitFor(label, predicate, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await sleep(100)
+  }
+  throw new Error(`${label} did not become true within ${timeoutMs}ms`)
+}
 
 function makeLogger() {
   const lines = []
   const push = (level) => (message) => lines.push(`${level}: ${message}`)
-  const logger = (..._a) => logger
+  const logger = (..._args) => logger
   logger.debug = push('debug')
   logger.info = push('info')
   logger.warn = push('warn')
@@ -62,20 +63,20 @@ function systemPromptStub() {
     getSectionOrder: () => 0,
     getContextOrder: () => 0,
     suppressRuntimeContext: () => () => {},
-    refreshContext: (a) => a,
+    refreshContext: (assembly) => assembly,
     assemble: async () => ({ sections: [] }),
   }
 }
 
-// ★ 捕获一切逃逸到进程级的异常。这是本测试的核心断言手段。
+/** Errors that escaped to the process level. Any entry fails the suite. */
 const uncaught = []
 process.on('uncaughtException', (error) => {
   uncaught.push(error)
-  console.log(`  !! uncaughtException: ${error.code ?? ''} ${error.message}`)
+  console.log(`  escaped uncaughtException: ${error.code ?? ''} ${error.message}`)
 })
 process.on('unhandledRejection', (reason) => {
   uncaught.push(reason instanceof Error ? reason : new Error(String(reason)))
-  console.log(`  !! unhandledRejection: ${reason}`)
+  console.log(`  escaped unhandledRejection: ${reason}`)
 })
 
 async function makePlugin(root, id, { sleepForever = false } = {}) {
@@ -86,8 +87,8 @@ async function makePlugin(root, id, { sleepForever = false } = {}) {
     JSON.stringify({ id, name: id, backend: 'python', entry: 'plugin.py', version: '1.0.0' }),
   )
   const body = sleepForever
-    ? `import time\nfrom dsh_runtime import plugin\n\n@plugin\ndef apply(ctx):\n    ctx.logger.info("sleeping")\n    time.sleep(600)\n`
-    : `from dsh_runtime import plugin\n\n@plugin\ndef apply(ctx):\n    @ctx.tools.register(name="${id.replace(/-/g, '_')}_ping", description="ping", parameters={"type":"object","properties":{},"additionalProperties":False})\n    def ping(args):\n        return {"pong": True}\n`
+    ? `import time\nfrom dsh_mloader_sdk import plugin\n\n@plugin\ndef apply(ctx):\n    ctx.logger.info("sleeping")\n    time.sleep(600)\n`
+    : `from dsh_mloader_sdk import plugin\n\n@plugin\ndef apply(ctx):\n    @ctx.tools.register(name="${id.replace(/-/g, '_')}_ping", description="ping", parameters={"type":"object","properties":{},"additionalProperties":False})\n    def ping(args):\n        return {"pong": True}\n`
   await writeFile(join(dir, 'plugin.py'), body)
   return dir
 }
@@ -103,37 +104,71 @@ async function mountLoader(config) {
   return { root, fiber, logger }
 }
 
+/** Run pgrep with one pattern and return the matching process ids. */
+async function pgrep(pattern) {
+  const pids = []
+  const child = spawn('pgrep', ['-f', pattern])
+  child.stdout.on('data', (chunk) => {
+    for (const line of String(chunk).trim().split('\n')) {
+      if (line.trim()) pids.push(Number(line.trim()))
+    }
+  })
+  await new Promise((resolve) => child.on('exit', resolve))
+  return pids
+}
+
+function cmdlineOf(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' ')
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Keep only processes started for this suite.
+ *
+ * Matching on the temporary root keeps unrelated plugins of other sessions out,
+ * and the interpreter prefix keeps the pattern from matching this test script.
+ */
+function ownPluginPids(pids, tempRoot) {
+  return pids.filter((pid) => {
+    const cmdline = cmdlineOf(pid)
+    return cmdline.startsWith('python3') && cmdline.includes(tempRoot)
+  })
+}
+
 async function main() {
   let tempRoot
   try {
     tempRoot = await mkdtemp(join(tmpdir(), 'mloader-crash-'))
 
-    section('① 子进程在管道断开后写入，不产生进程级异常')
+    section('1. A subprocess that dies with its pipe open raises no process level error')
     {
       const plugins = join(tempRoot, 'p1')
       await makePlugin(plugins, 'victim')
-      const { root, fiber, logger } = await mountLoader({
+      const { root, fiber } = await mountLoader({
         roots: [plugins],
         pythonBin: 'python3',
         profilePlugins: false,
-        seedExamples: false, console: false,
+        seedExamples: false,
+        console: false,
         statusTool: false,
-        statusCommand: false,
+        command: false,
       })
-      await sleep(3000)
+      await waitFor('victim loaded', () => (root.get('mloader')?.list() ?? []).some((entry) => entry.id === 'victim'))
 
       const manager = root.get('mloader')
-      check('插件已加载', (manager?.list() ?? []).some((p) => p.id === 'victim'),
-        JSON.stringify((manager?.list() ?? []).map((p) => p.id)))
+      const victim = manager?.list().find((entry) => entry.id === 'victim')
+      check('plugin is loaded', victim !== undefined, JSON.stringify((manager?.list() ?? []).map((entry) => entry.id)))
+      check('plugin handle is available', victim !== undefined)
 
-      // ★ 直接杀掉 Python 子进程，模仿 dsh 重启时的中断
-      const victim = manager?.list().find((p) => p.id === 'victim')
-      check('能取到插件句柄', victim !== undefined)
+      // Kill the child directly, the way a dsh restart interrupts it.
       await fiber.dispose()
       await sleep(800)
     }
 
-    section('② 反复杀子进程，观察是否有 EPIPE 逃逸')
+    section('2. Repeated child kills do not leak an EPIPE to the process level')
     {
       uncaught.length = 0
       const plugins = join(tempRoot, 'p2')
@@ -142,58 +177,40 @@ async function main() {
         roots: [plugins],
         pythonBin: 'python3',
         profilePlugins: false,
-        seedExamples: false, console: false,
+        seedExamples: false,
+        console: false,
         statusTool: false,
-        statusCommand: false,
+        command: false,
       })
-      await sleep(3000)
+      await waitFor('victim2 loaded', () => (root.get('mloader')?.list() ?? []).some((entry) => entry.id === 'victim2'))
+      await sleep(300)
 
-      // 找出插件进程并 SIGKILL，然后立刻触发写入（卸载会写 dispose 帧）
-      //
-      // ⚠️ 不能用 `pgrep -f victim2`：那会匹配到**本测试脚本自己的命令行**
-      // （脚本参数里就写着 victim2），结果把自己 SIGKILL 掉。
-      // 必须精确匹配 python3 解释器 + bootstrap 脚本路径。
-      const pids = []
-      const ps = spawn('pgrep', ['-f', 'python3.*dsh_bootstrap'])
-      ps.stdout.on('data', (d) => {
-        for (const line of String(d).trim().split('\n')) {
-          if (line.trim()) pids.push(Number(line.trim()))
-        }
-      })
-      await new Promise((r) => ps.on('exit', r))
-      // 过滤：命令行必须以 python3 开头，且参数里含本次测试的临时根目录。
-      // （用 tempRoot 全路径，避免 'p2' 这种短串误伤自己的测试脚本）
-      const mine = pids.filter((pid) => {
-        try {
-          const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' ')
-          return cmdline.startsWith('python3') && cmdline.includes(tempRoot)
-        } catch {
-          return false
-        }
-      })
-      check('找到插件子进程', mine.length > 0, `pids=${JSON.stringify(mine)}`)
-      pids.length = 0
-      pids.push(...mine)
+      // The pattern must name the runtime launcher and not this script. The
+      // command line filter then keeps processes of other sessions out.
+      const pids = ownPluginPids(await pgrep('python3.*launch.py'), tempRoot)
+      check('plugin subprocess found', pids.length > 0, `pids=${JSON.stringify(pids)}`)
 
       for (const pid of pids) {
         try {
           process.kill(pid, 'SIGKILL')
         } catch {
-          // 可能已退出
+          // The process may have exited already.
         }
       }
-      // ★ 关键：子进程已死，此刻卸载会往死管道写 dispose 帧
-      const dbgT = Date.now()
+      // The child is dead now, so unload writes the dispose frame into a dead pipe.
+      const disposeStartedAt = Date.now()
       await fiber.dispose()
-      const disposeMs = Date.now() - dbgT
+      const disposeMs = Date.now() - disposeStartedAt
       await sleep(1200)
-      check('卸载很快返回（< 3s）', disposeMs < 3000, `${disposeMs}ms`)
-
-      check('★ 没有 uncaughtException 逃逸', uncaught.length === 0,
-        uncaught.map((e) => `${e.code ?? ''} ${e.message}`).join(' | '))
+      check('unload returns quickly (< 3s)', disposeMs < 3000, `${disposeMs}ms`)
+      check(
+        'no uncaughtException escaped',
+        uncaught.length === 0,
+        uncaught.map((error) => `${error.code ?? ''} ${error.message}`).join(' | '),
+      )
     }
 
-    section('③ 启动即失败的插件（exec 失败）不崩码头')
+    section('3. A plugin whose interpreter cannot start does not crash the loader')
     {
       uncaught.length = 0
       const plugins = join(tempRoot, 'p3')
@@ -202,86 +219,75 @@ async function main() {
         roots: [plugins],
         pythonBin: '/nonexistent/python-does-not-exist',
         profilePlugins: false,
-        seedExamples: false, console: false,
+        seedExamples: false,
+        console: false,
         statusTool: false,
-        statusCommand: false,
+        command: false,
       })
-      await sleep(2500)
+      await waitFor(
+        'plugin marked failed',
+        () => (root.get('mloader')?.list() ?? []).some((entry) => entry.state === 'failed'),
+      )
 
       const list = root.get('mloader')?.list() ?? []
-      check('插件被标记为失败而不是崩溃', list.length === 1 && list[0].state === 'failed',
-        JSON.stringify(list.map((p) => `${p.id}:${p.state}`)))
-      check('★ 没有 uncaughtException 逃逸', uncaught.length === 0,
-        uncaught.map((e) => `${e.code ?? ''} ${e.message}`).join(' | '))
+      check('plugin is failed instead of crashing the host', list.length === 1 && list[0].state === 'failed',
+        JSON.stringify(list.map((entry) => `${entry.id}:${entry.state}`)))
+      check(
+        'no uncaughtException escaped',
+        uncaught.length === 0,
+        uncaught.map((error) => `${error.code ?? ''} ${error.message}`).join(' | '),
+      )
 
       await fiber.dispose()
       await sleep(500)
     }
 
-    section('④ 插件在 apply 期间卡死，卸载仍能完成')
+    section('4. A plugin stuck in apply does not prevent unload')
     {
       uncaught.length = 0
       const plugins = join(tempRoot, 'p4')
       await makePlugin(plugins, 'sleepy', { sleepForever: true })
-      const { root, fiber } = await mountLoader({
+      const { fiber } = await mountLoader({
         roots: [plugins],
         pythonBin: 'python3',
         profilePlugins: false,
-        seedExamples: false, console: false,
+        seedExamples: false,
+        console: false,
         statusTool: false,
-        statusCommand: false,
+        command: false,
       })
-      // 只等一小会儿，此时插件还在 time.sleep，boot 尚未成功
+      // The plugin is still inside its apply sleep, so boot has not completed.
       await sleep(800)
 
-      const started = Date.now()
+      const startedAt = Date.now()
       await fiber.dispose()
-      const elapsed = Date.now() - started
-      check('卸载在合理时间内返回', elapsed < 8000, `${elapsed}ms`)
-      check('★ 没有 uncaughtException 逃逸', uncaught.length === 0,
-        uncaught.map((e) => `${e.code ?? ''} ${e.message}`).join(' | '))
+      const elapsed = Date.now() - startedAt
+      check('unload returns within a bounded time', elapsed < 8000, `${elapsed}ms`)
+      check(
+        'no uncaughtException escaped',
+        uncaught.length === 0,
+        uncaught.map((error) => `${error.code ?? ''} ${error.message}`).join(' | '),
+      )
     }
 
-    section('⑤ 残留的 Python 进程已被清理')
+    section('5. No Python process from this suite is left behind')
     {
       await sleep(500)
-      const ps = spawn('pgrep', ['-f', 'python3.*dsh_bootstrap'])
-      let out = ''
-      ps.stdout.on('data', (d) => { out += String(d) })
-      await new Promise((r) => ps.on('exit', r))
-      // 只统计命令行里含本次临时目录的（别的会话的插件不能算进来）
-      const all = out.trim().split('\n').filter((l) => l.trim()).map(Number)
-      const leaked = all.filter((pid) => {
-        try {
-          const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' ')
-          return cmdline.startsWith('python3') && cmdline.includes(tempRoot)
-        } catch {
-          return false
-        }
-      })
-      // 回收是异步的（SIGTERM 后最多再等 2 秒才 SIGKILL），轮询确认。
-      let final = leaked
-      for (let i = 0; i < 30 && final.length > 0; i++) {
+      let leaked = ownPluginPids(await pgrep('python3.*launch.py'), tempRoot)
+      // Reaping is asynchronous: SIGTERM is followed by SIGKILL after a bounded wait.
+      for (let attempt = 0; attempt < 30 && leaked.length > 0; attempt += 1) {
         await sleep(200)
-        final = final.filter((pid) => {
-          try {
-            const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' ')
-            return cmdline.startsWith('python3')
-          } catch {
-            return false
-          }
-        })
+        leaked = ownPluginPids(await pgrep('python3.*launch.py'), tempRoot)
       }
-      check('没有本次测试遗留的子进程', final.length === 0, `残留 ${JSON.stringify(final)}`)
+      check('no child process of this suite remains', leaked.length === 0, `remaining=${JSON.stringify(leaked)}`)
     }
 
-    console.log(`\n${'─'.repeat(60)}`)
     if (failures.length === 0) {
-      console.log(`✅ 全部通过：${passed} 项断言`)
+      console.log(`\nAll passed: ${passed} assertions`)
       process.exitCode = 0
     } else {
-      console.log(`❌ ${failures.length} 项失败 / 共 ${passed + failures.length} 项`)
-      for (const f of failures) console.log(`   - ${f}`)
+      console.log(`\n${failures.length} failed out of ${passed + failures.length}`)
+      for (const failure of failures) console.log(`   - ${failure}`)
       process.exitCode = 1
     }
   } finally {
@@ -290,6 +296,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('\n❌ 测试脚本崩溃:', error)
+  console.error('\nTest script failed:', error)
   process.exit(1)
 })

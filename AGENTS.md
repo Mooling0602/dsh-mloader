@@ -72,17 +72,23 @@ requires. This section only defines what that message must look like.
 Every module, public class and public function carries a docstring in the standard
 documentation format of the language it is written in.
 
-- **JavaScript / ESM** (`src/**/*.js`): JSDoc. Put a `/** ... */` block on every
-  exported symbol with `@param`, `@returns`, `@throws` or `@template` where they
-  apply. Use inline JSDoc type annotations where the signature alone does not convey
-  the shape of a value.
-- **Python** (`src/runtime/*.py`, `seed/**/*.py`): **reStructuredText** docstrings in
-  the Sphinx convention. Follow the PEP 257 layout, which is a one line summary, a
-  blank line, then the body, and use field lists for the contract, written as
-  `:param name:`, `:type name:`, `:returns:`, `:rtype:` and `:raises ValueError:`.
+- **TypeScript** (`src/**/*.ts`): JSDoc. Put a `/** ... */` block on every exported
+  symbol. The type signature carries the types; use `@param`, `@returns` and
+  `@throws` only for the part of the contract the signature cannot express, such as
+  units, ordering and failure conditions. Use inline JSDoc annotations where a value
+  shape is not visible from the declaration.
+- **Python** (`src/runtime/python_sdk/**/*.py`, `seed/**/*.py`): **reStructuredText**
+  docstrings in the Sphinx convention. Follow the PEP 257 layout, which is a one line
+  summary, a blank line, then the body, and use field lists for the contract, written
+  as `:param name:`, `:type name:`, `:returns:`, `:rtype:` and `:raises ValueError:`.
   Write the format name in full where it matters and do not abbreviate it.
 - **Go** (test fixtures under `test/`): standard Go doc comments that begin with the
   name of the identifier they describe.
+
+The source of the loader is TypeScript. A `.js` file beside a `.ts` source is build
+output produced by `pnpm build` and is committed only until release artifacts replace
+it. Change the `.ts` file, rebuild, and never edit or document the generated `.js`
+file.
 
 A docstring states a contract. It does not restate the signature. Say what the code
 does, what it owns, what it may throw and which invariant the caller must uphold.

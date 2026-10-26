@@ -1,20 +1,21 @@
-"""边界测试插件：崩溃与超时。
+"""Fault injection fixture: crash, hang and process identity.
 
-这个插件被 loader 启动后，可以通过工具触发不同故障，验证隔离行为。
+Each tool triggers one failure mode so the loader's isolation behavior can be
+asserted while the plugin process is running.
 """
 
 import os
 import sys
 import time
 
-from dsh_runtime import plugin
+from dsh_mloader_sdk import plugin
 
 
 @plugin
 def apply(ctx):
     @ctx.tools.register(
         name="crash_me",
-        description="直接让插件进程崩溃（os._exit），验证宿主存活",
+        description="Exit the plugin process immediately to prove the host survives",
         parameters={"type": "object", "properties": {}, "additionalProperties": False},
     )
     def crash_me(args):
@@ -22,7 +23,7 @@ def apply(ctx):
 
     @ctx.tools.register(
         name="hang_me",
-        description="无限循环，验证调用超时",
+        description="Sleep inside the call to prove the call timeout",
         parameters={
             "type": "object",
             "properties": {"seconds": {"type": "number"}},
@@ -36,7 +37,7 @@ def apply(ctx):
 
     @ctx.tools.register(
         name="bad_schema_probe",
-        description="返回不可序列化的对象，验证渲染兜底",
+        description="Return a plain value to probe the renderer fallback",
         parameters={"type": "object", "properties": {}, "additionalProperties": False},
     )
     def bad_schema_probe(args):
@@ -44,7 +45,7 @@ def apply(ctx):
 
     @ctx.tools.register(
         name="whoami",
-        description="返回插件进程的 pid，用于验证进程隔离",
+        description="Return the plugin process id and its parent for process isolation checks",
         parameters={"type": "object", "properties": {}, "additionalProperties": False},
     )
     def whoami(args):

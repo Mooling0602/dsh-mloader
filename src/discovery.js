@@ -1,143 +1,154 @@
 /**
- * dsh-mloader — 插件发现
+ * Discovery of external plugins under the configured roots.
  *
- * 扫描 roots 下的 `mloader.plugin.json`，构造 PluginSpec。发现阶段绝不抛错：
- * 一个坏 manifest 只让那个插件失败，不拖垮整个 loader。
+ * A root is scanned for `mloader.plugin.json` manifests. A manifest that cannot
+ * be read or validated produces one error and is skipped; discovery never
+ * rejects because of a single bad plugin.
+ *
+ * @module discovery
  */
-
-import { readdir, readFile, stat } from 'node:fs/promises'
-import { join, resolve, dirname } from 'node:path'
-import { isValidPluginId } from './contract.js'
-
-/** 元数据文件名。带前缀，避免和别的工具的 `plugin.json` 撞名。 */
-export const MANIFEST_NAME = 'mloader.plugin.json'
-
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { isValidPluginId } from './contract.js';
+/** Metadata file name that marks a plugin directory. */
+export const MANIFEST_NAME = 'mloader.plugin.json';
 /**
- * 读取并规范化一个 manifest。
- * @param path - manifest 的绝对路径。
- * @returns 规范化后的 PluginSpec。
+ * Read and normalise one manifest.
+ *
+ * @param path - Absolute manifest path.
+ * @returns The normalised plugin specification.
+ * @throws {Error} When the file is not a JSON object, or a required field is
+ *   missing or outside its grammar.
  */
 async function readManifest(path) {
-  const raw = await readFile(path, 'utf8')
-  let parsed
-  try {
-    parsed = JSON.parse(raw)
-  } catch (error) {
-    throw new Error(`${path} is not valid JSON: ${error.message}`)
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${path} must contain a JSON object`)
-  }
-
-  const baseDir = dirname(path)
-  const id = parsed.id
-  if (!isValidPluginId(id)) {
-    throw new Error(`${path}: id ${JSON.stringify(id)} must match ^[a-z0-9][a-z0-9_-]{0,31}$`)
-  }
-  const backend = parsed.backend
-  if (backend !== 'python' && backend !== 'wasm') {
-    throw new Error(`${path}: backend must be "python" or "wasm", got ${JSON.stringify(backend)}`)
-  }
-  if (typeof parsed.entry !== 'string' || parsed.entry.length === 0) {
-    throw new Error(`${path}: entry is required and must be a non-empty string`)
-  }
-
-  const timeouts = parsed.timeouts ?? {}
-  return {
-    id,
-    name: typeof parsed.name === 'string' && parsed.name ? parsed.name : id,
-    version: typeof parsed.version === 'string' ? parsed.version : '0.0.0',
-    backend,
-    entry: resolve(baseDir, parsed.entry),
-    baseDir,
-    manifestPath: path,
-    enabled: parsed.enabled !== false,
-    inject: Array.isArray(parsed.inject) ? parsed.inject.map(String) : [],
-    capabilities: {
-      tools: parsed.capabilities?.tools !== false,
-      events: parsed.capabilities?.events !== false,
-      logger: parsed.capabilities?.logger !== false,
-      effect: parsed.capabilities?.effect !== false,
-    },
-    timeouts: {
-      startupMs: Number.isFinite(timeouts.startupMs) ? timeouts.startupMs : 10_000,
-      callMs: Number.isFinite(timeouts.callMs) ? timeouts.callMs : 30_000,
-    },
-    env: parsed.env && typeof parsed.env === 'object' ? { ...parsed.env } : {},
-    // 声明式风格（风格 B）从这里读；apply 风格在插件侧自己注册。
-    declared: parsed,
-  }
+    const raw = await readFile(path, 'utf8');
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch (error) {
+        throw new Error(`${path} is not valid JSON: ${messageOf(error)}`);
+    }
+    if (!isRecord(parsed)) {
+        throw new Error(`${path} must contain a JSON object`);
+    }
+    const baseDir = dirname(path);
+    const id = parsed.id;
+    if (!isValidPluginId(id)) {
+        throw new Error(`${path}: id ${JSON.stringify(id)} must match ^[a-z0-9][a-z0-9_-]{0,31}$`);
+    }
+    const backend = parsed.backend;
+    if (backend !== 'python' && backend !== 'wasm') {
+        throw new Error(`${path}: backend must be "python" or "wasm", got ${JSON.stringify(backend)}`);
+    }
+    if (typeof parsed.entry !== 'string' || parsed.entry.length === 0) {
+        throw new Error(`${path}: entry is required and must be a non-empty string`);
+    }
+    const timeouts = isRecord(parsed.timeouts) ? parsed.timeouts : {};
+    const capabilities = isRecord(parsed.capabilities) ? parsed.capabilities : {};
+    const rawEnv = isRecord(parsed.env) ? parsed.env : {};
+    const env = {};
+    for (const [key, value] of Object.entries(rawEnv)) {
+        env[key] = typeof value === 'string' ? value : String(value);
+    }
+    return {
+        id,
+        name: typeof parsed.name === 'string' && parsed.name ? parsed.name : id,
+        version: typeof parsed.version === 'string' ? parsed.version : '0.0.0',
+        backend: backend,
+        entry: resolve(baseDir, parsed.entry),
+        baseDir,
+        manifestPath: path,
+        enabled: parsed.enabled !== false,
+        inject: Array.isArray(parsed.inject) ? parsed.inject.map(String) : [],
+        capabilities: {
+            tools: capabilities.tools !== false,
+            events: capabilities.events !== false,
+            logger: capabilities.logger !== false,
+            effect: capabilities.effect !== false,
+        },
+        timeouts: {
+            startupMs: finiteNumber(timeouts.startupMs, 10_000),
+            callMs: finiteNumber(timeouts.callMs, 30_000),
+        },
+        env,
+        declared: parsed,
+    };
 }
-
 /**
- * 发现一个 root 下的全部插件。
+ * Scan the plugin roots.
  *
- * 目录结构：`<root>/<dir>/mloader.plugin.json`。也允许 root 直接就是一个插件目录。
+ * Each root may itself be a plugin directory or contain plugin directories.
+ * A duplicate plugin id is reported on the later manifest and skipped.
  *
- * @param roots - 插件根目录列表（绝对路径）。
- * @param logger - 用于报告坏 manifest。
- * @returns `{ specs, errors }`，errors 不阻断其余插件的加载。
+ * @param roots - Absolute root directories.
+ * @param logger - Optional logger for manifest failures.
+ * @returns Discovered plugins sorted by id, plus the rejected manifests.
  */
 export async function discover(roots, logger) {
-  const specs = []
-  const errors = []
-  const seenIds = new Map()
-
-  for (const root of roots) {
-    let entries
-    try {
-      const info = await stat(root)
-      if (info.isDirectory()) {
-        entries = await readdir(root, { withFileTypes: true })
-      } else {
-        entries = []
-      }
-    } catch (error) {
-      errors.push({ root, message: `cannot read plugin root: ${error.message}` })
-      continue
-    }
-
-    // root 本身就是一个插件目录的情形
-    const candidates = []
-    if (await pathExists(join(root, MANIFEST_NAME))) {
-      candidates.push(join(root, MANIFEST_NAME))
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const manifestPath = join(root, entry.name, MANIFEST_NAME)
-      if (await pathExists(manifestPath)) candidates.push(manifestPath)
-    }
-
-    for (const manifestPath of candidates) {
-      try {
-        const spec = await readManifest(manifestPath)
-        const previous = seenIds.get(spec.id)
-        if (previous) {
-          errors.push({
-            manifest: manifestPath,
-            message: `duplicate plugin id "${spec.id}" (already at ${previous})`,
-          })
-          continue
+    const specs = [];
+    const errors = [];
+    const seenIds = new Map();
+    for (const root of roots) {
+        let entries;
+        try {
+            const info = await stat(root);
+            entries = info.isDirectory() ? await readdir(root, { withFileTypes: true }) : [];
         }
-        seenIds.set(spec.id, manifestPath)
-        specs.push(spec)
-      } catch (error) {
-        errors.push({ manifest: manifestPath, message: error.message })
-        logger?.warn?.(`skip ${manifestPath}: ${error.message}`)
-      }
+        catch (error) {
+            errors.push({ root, message: `cannot read plugin root: ${messageOf(error)}` });
+            continue;
+        }
+        const candidates = [];
+        const rootManifest = join(root, MANIFEST_NAME);
+        if (await pathExists(rootManifest))
+            candidates.push(rootManifest);
+        for (const entry of entries) {
+            if (!entry.isDirectory())
+                continue;
+            const manifestPath = join(root, entry.name, MANIFEST_NAME);
+            if (await pathExists(manifestPath))
+                candidates.push(manifestPath);
+        }
+        for (const manifestPath of candidates) {
+            try {
+                const spec = await readManifest(manifestPath);
+                const previous = seenIds.get(spec.id);
+                if (previous !== undefined) {
+                    errors.push({
+                        manifest: manifestPath,
+                        message: `duplicate plugin id "${spec.id}" (already at ${previous})`,
+                    });
+                    continue;
+                }
+                seenIds.set(spec.id, manifestPath);
+                specs.push(spec);
+            }
+            catch (error) {
+                const message = messageOf(error);
+                errors.push({ manifest: manifestPath, message });
+                logger?.warn?.(`skip ${manifestPath}: ${message}`);
+            }
+        }
     }
-  }
-
-  // 稳定顺序，便于测试复现
-  specs.sort((a, b) => a.id.localeCompare(b.id))
-  return { specs, errors }
+    specs.sort((left, right) => left.id.localeCompare(right.id));
+    return { specs, errors };
 }
-
 async function pathExists(path) {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    return false
-  }
+    try {
+        await stat(path);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function finiteNumber(value, fallback) {
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+function isRecord(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function messageOf(error) {
+    return error instanceof Error ? error.message : String(error);
 }
