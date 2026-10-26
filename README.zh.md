@@ -89,6 +89,8 @@ Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开�
   Python SDK 的导入方式、能力白名单、RPC 协议、生命周期、后端接口和 WebAssembly ABI。
 - [CONTEXT.md](CONTEXT.md)：面向维护者的技术细节，包括构建与产物策略、配置默认值、
   测试方法和重启验收清单。
+- [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk)：
+  Python SDK 包，是 `src/runtime/python_sdk/` 的镜像，带打包元数据和测试。
 
 ## 许可证
 

@@ -96,6 +96,9 @@ does not install anything.
   RPC protocol, the lifecycle, the backend interface and the WebAssembly ABI.
 - [CONTEXT.md](CONTEXT.md): technical detail for maintainers, including the build and
   artifact policy, configuration defaults, test recipes and the restart checklist.
+- [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk):
+  the Python SDK package, a mirror of `src/runtime/python_sdk/` with the packaging
+  metadata and tests.
 
 ## License
 
