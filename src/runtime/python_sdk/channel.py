@@ -18,8 +18,8 @@ import json
 import sys
 from typing import IO, Any, Callable
 
-from ._errors import HostUnavailable, PluginCallError
-from ._version import PROTOCOL_VERSION
+from .errors import HostUnavailable, PluginCallError
+from .version import PROTOCOL_VERSION
 
 _HostRequestHandler = Callable[[dict[str, Any]], None]
 

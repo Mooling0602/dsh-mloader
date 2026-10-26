@@ -140,6 +140,10 @@ The loader scans each configured root for `mloader.plugin.json`:
 The Python runtime is shipped in the loader repository under
 `src/runtime/python_sdk/` and is additionally MIT licensed. It is a flat package with
 import name `dsh_mloader_sdk`, standard library only, requiring Python 3.10 or later.
+The package is split into the modules `channel`, `context`, `errors`, `runtime` and
+`version`. Plugin code normally imports the public names from the package root, and
+those modules are also importable directly, for example
+`from dsh_mloader_sdk.context import Context`.
 
 The loader starts a Python plugin as:
 

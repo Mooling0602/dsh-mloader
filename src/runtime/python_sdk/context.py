@@ -13,8 +13,8 @@ import sys
 import traceback
 from typing import Any, Callable
 
-from ._channel import Channel
-from ._errors import HostUnavailable
+from .channel import Channel
+from .errors import HostUnavailable
 
 _Handler = Callable[..., Any]
 _Cleanup = Callable[[], None]

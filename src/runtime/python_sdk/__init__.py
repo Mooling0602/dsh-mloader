@@ -25,10 +25,10 @@ Both styles may be mixed in one plugin. The wire protocol is version 1 and is
 specified in ``docs/ABI.md`` of the dsh-mloader repository.
 """
 
-from ._context import Context, ctx, get_context
-from ._errors import HostUnavailable, PluginCallError
-from ._runtime import plugin, tool
-from ._version import PROTOCOL_VERSION, __version__
+from .context import Context, ctx, get_context
+from .errors import HostUnavailable, PluginCallError
+from .runtime import plugin, tool
+from .version import PROTOCOL_VERSION, __version__
 
 __all__ = [
     "PROTOCOL_VERSION",

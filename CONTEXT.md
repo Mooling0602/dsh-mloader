@@ -114,8 +114,8 @@ reentrancy fixture under `test/deadlock/reentrant/` and the event projection fix
 under `test/exec-payload/exec-observer/`.
 
 The Python SDK is a flat package. Its content is the directory
-`src/runtime/python_sdk/`: `__init__.py`, `launch.py`, `_channel.py`, `_context.py`,
-`_errors.py`, `_runtime.py`, `_version.py`, `py.typed` and `LICENSE`. There is no
+`src/runtime/python_sdk/`: `__init__.py`, `launch.py`, `channel.py`, `context.py`,
+`errors.py`, `runtime.py`, `version.py`, `py.typed` and `LICENSE`. There is no
 nested package directory inside it.
 
 ### Build and artifact policy
@@ -209,7 +209,7 @@ dsh-mloader-python-sdk/
   README.md                SDK documentation
   LICENSE                  MIT license text
   src/dsh-mloader-sdk/     the generated copy of src/runtime/python_sdk/
-  tests/conftest.py        pytest fixtures
+  tests/support.py         shared test helpers
   tests/test_public_api.py
   tests/test_context_namespaces.py
   tests/test_registration.py
@@ -341,7 +341,7 @@ Then verify the copy from the SDK repository root:
 
 ```bash
 uv sync
-uv run pytest                        # 38 tests
+uv run python -m unittest discover -s tests  # 38 tests
 uv run python -c "import dsh_mloader_sdk; print(dsh_mloader_sdk.__version__)"
 uv build --wheel                     # contains every runtime file, py.typed and LICENSE
 diff -r <dsh-mloader checkout>/src/runtime/python_sdk src/dsh-mloader-sdk

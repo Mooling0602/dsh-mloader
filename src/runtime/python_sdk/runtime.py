@@ -19,8 +19,8 @@ import traceback
 from types import ModuleType
 from typing import Any, Callable
 
-from ._channel import Channel
-from ._context import Context, _empty_object_schema, state
+from .channel import Channel
+from .context import Context, _empty_object_schema, state
 
 _PLUGIN_MODULE_NAME = "dsh_user_plugin"
 

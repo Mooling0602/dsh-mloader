@@ -71,7 +71,7 @@ def main(argv: list[str]) -> int:
         sys.path.insert(0, plugin_dir)
 
     _load_runtime()
-    runtime = importlib.import_module(f"{_PACKAGE_NAME}._runtime")
+    runtime = importlib.import_module(f"{_PACKAGE_NAME}.runtime")
     return runtime.run(plugin_path)
 
 
