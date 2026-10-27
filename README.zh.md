@@ -21,7 +21,7 @@ dsh plugin --profile web add github:Mooling0602/dsh-mloader#v0.1.0
 
 安装完成后重启 dsh。加载器不需要配置，dsh 会自己把这个包加进 `dsh.profile.bundles`。包内已经带有构建好的 JavaScript，且没有运行时依赖，所以安装过程不需要编译。
 
-默认值就是可用的。想改某一项时，在 profile 的 `cordis.patch.yml` 里用同一个 id 覆盖即可；完整的配置项说明见 [CONTEXT.md](CONTEXT.md)。
+默认值就是可用的。想改某一项时，在 profile 的 `cordis.patch.yml` 里用同一个 id 覆盖即可；下面「配置」一节说明每个键的作用。
 
 卸载：
 
@@ -51,7 +51,7 @@ dsh plugin --profile web remove dsh-mloader
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
-插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见 [CONTEXT.md](CONTEXT.md)。监听默认开启；在 profile 的 `cordis.patch.yml` 里给 `dsh-mloader` 这个 id 设置 `watch: false` 可以关掉，关掉之后新增插件需要重启 dsh。
+插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见 [CONTEXT.md](CONTEXT.md)。监听默认开启，关掉的方法见[配置](#配置)，关掉之后新增插件需要重启 dsh。
 
 ## 查看与切换插件
 
@@ -65,6 +65,35 @@ dsh plugin --profile web remove dsh-mloader
 `/mloader` 列出全部插件，`/mloader <plugin-id>` 查看单个插件，`/mloader load <plugin-id>`、`/mloader unload <plugin-id>` 和 `/mloader reload <plugin-id>` 在运行时切换插件。只有已经装在 profile 里的插件才能被加载。
 
 在 web profile 下，dsh 的插件页面里 dsh-mloader bundle 的详情页有一个「外部插件」区块，每个被托管的插件对应一个开关。开关立即生效，只在当前运行的 dsh 进程里有效：它不会修改插件目录，重启后每个插件都会回到清单文件声明的状态。插件必须先装在 profile 的插件目录里才会出现在这个区块里，开关本身不会安装任何东西。
+
+## 配置
+
+默认值就是可用的。想改某一项时，在 profile 的 `cordis.patch.yml` 里指定 `dsh-mloader` 这个 id，然后重启 dsh：
+
+```yaml
+- id: dsh-mloader
+  config:
+    console: false
+```
+
+每个键都可以省略。「默认」列就是省略该键时 dsh-mloader 采用的值，所以只有你的情况和它不一样时才需要设置：
+
+| 键 | 默认 | 作用 |
+| --- | --- | --- |
+| `roots` | `[]` | 在 profile 目录之外额外扫描的插件根目录。 |
+| `profilePlugins` | `true` | 是否扫描 `<profile>/mloader/plugins`。设为 `false` 时只扫描 `roots`。 |
+| `profileDir` | 自动探测 | 覆盖加载器通过 dsh 解析到的 profile 目录，不设置时自动探测。用于测试。 |
+| `autoEnable` | `true` | 已安装的插件是否随 dsh 启动。`false` 时插件保持发现状态，需要手动加载。 |
+| `pythonBin` | `python3` | Python 插件使用的解释器。 |
+| `enablePyc` | `false` | 是否保留 Python 写在插件旁边的字节码缓存。关闭时每次重新加载都执行磁盘上的代码，开启则是用这个保证换取更快的启动。 |
+| `statusTool` | `true` | 是否为模型注册 `mloader_status` 工具。 |
+| `command` | `true` | `/mloader` 命令：`true` 用默认名，字符串为自定义名，`false` 关闭。 |
+| `seedExamples` | `true` | 首次启动时是否把随包的示例释放到 profile 里。 |
+| `console` | `true` | 终端输出：`true` 只打印生命周期行，`'verbose'` 连扫描细节一起打印，`false` 静默。 |
+| `watch` | `true` | dsh 运行期间新增或删除的插件目录是否免重启自动挂载和卸载。 |
+| `wasm.enabled` | `false` | 是否启用 WebAssembly 后端。 |
+
+每项取值的格式、字节码缓存的取舍和重启验收清单见 [CONTEXT.md](CONTEXT.md)。
 
 ## 文档
 

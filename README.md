@@ -21,7 +21,7 @@ dsh plugin --profile web add github:Mooling0602/dsh-mloader#v0.1.0
 
 Restart dsh after installing. The loader needs no configuration, and dsh adds the package to `dsh.profile.bundles` by itself. The package ships built JavaScript and has no runtime dependencies, so installation needs no compiler step.
 
-The defaults are already correct. To change one, override the same id in the profile's `cordis.patch.yml`; the full key reference is in [CONTEXT.md](CONTEXT.md).
+The defaults are already correct. To change one, override the same id in the profile's `cordis.patch.yml`; [Configuration](#configuration) below says what each key does.
 
 To uninstall:
 
@@ -51,7 +51,7 @@ Each plugin lives in its own directory under the profile:
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
-A plugin directory contains a `mloader.plugin.json` manifest and its entry file. Copy the directory in while dsh runs: the loader watches the plugin roots, so a directory that appears is mounted and one that is deleted is unmounted, both without a restart. After editing the files of an installed plugin, run `/mloader reload <plugin-id>`. The loader finds the current profile through dsh, so no path configuration is needed. Python plugins need Python 3.10 or later. The WASM backend is disabled by default; see [CONTEXT.md](CONTEXT.md) to enable it. Watching is on by default. Set `watch: false` for the `dsh-mloader` id in the profile's `cordis.patch.yml` to turn it off, and a plugin added to the directory then needs a restart.
+A plugin directory contains a `mloader.plugin.json` manifest and its entry file. Copy the directory in while dsh runs: the loader watches the plugin roots, so a directory that appears is mounted and one that is deleted is unmounted, both without a restart. After editing the files of an installed plugin, run `/mloader reload <plugin-id>`. The loader finds the current profile through dsh, so no path configuration is needed. Python plugins need Python 3.10 or later. The WASM backend is disabled by default; see [CONTEXT.md](CONTEXT.md) to enable it. Watching is on by default; see [Configuration](#configuration) to turn it off, and a plugin added to the directory then needs a restart.
 
 ## Inspect and switch plugins
 
@@ -65,6 +65,35 @@ Two surfaces read the same snapshot:
 `/mloader` lists every plugin, `/mloader <plugin-id>` shows one, and `/mloader load <plugin-id>`, `/mloader unload <plugin-id>` and `/mloader reload <plugin-id>` change one at runtime. Loading only works for a plugin that is already installed under the profile.
 
 In a web profile, the dsh-mloader bundle detail page on the dsh Plugins page has an External plugins section with one switch per hosted plugin. A switch takes effect immediately and lasts for the running dsh only: it never edits the plugin directory, and every plugin returns to the state its manifest declares after a restart. A plugin must already be installed under the profile plugin directory to appear there; the switch does not install anything.
+
+## Configuration
+
+The defaults are already correct. To change one, target the `dsh-mloader` id in the profile's `cordis.patch.yml` and restart dsh:
+
+```yaml
+- id: dsh-mloader
+  config:
+    console: false
+```
+
+Every key is optional. The default column is what dsh-mloader uses when you leave the key out, so the only reason to set one is that your situation differs from it:
+
+| Key | Default | What it controls |
+| --- | --- | --- |
+| `roots` | `[]` | Extra directories to scan for plugin directories, on top of the profile one. |
+| `profilePlugins` | `true` | Whether `<profile>/mloader/plugins` is scanned. `false` scans only `roots`. |
+| `profileDir` | detected | Overrides the profile directory the loader resolves through dsh, which is otherwise detected. For tests. |
+| `autoEnable` | `true` | Whether installed plugins start with dsh. `false` leaves them discovered until you load one. |
+| `pythonBin` | `python3` | The Python executable used for Python plugins. |
+| `enablePyc` | `false` | Whether Python keeps the bytecode cache it writes beside a plugin. Off means a reload always runs the code on disk, so turning it on trades that for a faster start. |
+| `statusTool` | `true` | Whether the `mloader_status` tool is registered for the model. |
+| `command` | `true` | The `/mloader` command: `true` for the default name, a string for a custom name, `false` to disable it. |
+| `seedExamples` | `true` | Whether the bundled example is released into the profile on first start. |
+| `console` | `true` | Terminal output: `true` for lifecycle lines, `'verbose'` for scan detail as well, `false` for silence. |
+| `watch` | `true` | Whether plugin directories added or removed while dsh runs are mounted or unmounted without a restart. |
+| `wasm.enabled` | `false` | Whether the WebAssembly backend is enabled. |
+
+The shape of each value, the bytecode cache trade-off and the restart checklist are in [CONTEXT.md](CONTEXT.md).
 
 ## Documentation
 
