@@ -4,7 +4,8 @@
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的多运行时插件加载器。它本身是一个普通的 Cordis 插件，用来托管用 Python 和 WebAssembly 写的插件。被托管的外部插件不是 dsh 插件：它们没有自己的 dsh 插件条目。在 web profile 下，dsh 的插件页面会在 dsh-mloader bundle 的详情页里用「外部插件」区块列出它们。名字的含义是多运行时加载器，开头的 m 也可理解为作者 GitHub 用户名的首字母。
 
-[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness) [![](https://img.shields.io/github/license/Mooling0602/dsh-mloader?style=flat-square)](https://github.com/Mooling0602/dsh-mloader/blob/main/LICENSE)
+[![dsh-badge](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+[![license-lgpl-3.0-badge](https://img.shields.io/github/license/Mooling0602/dsh-mloader?style=flat-square)](https://github.com/Mooling0602/dsh-mloader/blob/main/LICENSE)
 
 ## 安装
 
@@ -34,7 +35,7 @@ dsh plugin --profile web remove dsh-mloader
 
 重启后，运行 dsh 的终端里会为每个生命周期事件打印一行 `[mloader]` 开头的消息。全新的 profile 还会收到随包自带的示例插件：
 
-```
+```sh
 [mloader] seeded: hello-mloader
 [mloader] mounted hello-mloader (python, tools: hello_add, hello_mloader)
 [mloader] ready: 1 plugin(s) mounted
@@ -46,7 +47,7 @@ dsh plugin --profile web remove dsh-mloader
 
 每个插件放在 profile 下自己的目录里：
 
-```
+```plaintext
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
@@ -57,7 +58,7 @@ dsh plugin --profile web remove dsh-mloader
 两个入口读取同一份快照：
 
 | 谁 | 怎么用 |
-|---|---|
+| --- | --- |
 | 你 | `/mloader` 命令 |
 | 模型 | `mloader_status` 工具 |
 

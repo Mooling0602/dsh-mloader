@@ -4,7 +4,8 @@ English | [简体中文](README.zh.md)
 
 Multi-runtime plugin loader for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It is one ordinary Cordis plugin that hosts plugins written in Python and WebAssembly. The hosted plugins are not dsh plugins: they have no dsh plugin entry of their own. In a web profile, the dsh Plugins page shows them in an External plugins section on the dsh-mloader bundle detail page. The name means multi-runtime loader, and the leading m also matches the author's GitHub handle initial.
 
-[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness) [![](https://img.shields.io/github/license/Mooling0602/dsh-mloader?style=flat-square)](https://github.com/Mooling0602/dsh-mloader/blob/main/LICENSE)
+[![dsh-badge](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+[![license-lgpl-3.0-badge](https://img.shields.io/github/license/Mooling0602/dsh-mloader?style=flat-square)](https://github.com/Mooling0602/dsh-mloader/blob/main/LICENSE)
 
 ## Install
 
@@ -34,7 +35,7 @@ Uninstalling the loader does not delete the plugins installed under the profile.
 
 After the restart the loader prints one `[mloader]` line per lifecycle event in the terminal that runs dsh. A fresh profile also receives the bundled example plugin:
 
-```
+```sh
 [mloader] seeded: hello-mloader
 [mloader] mounted hello-mloader (python, tools: hello_add, hello_mloader)
 [mloader] ready: 1 plugin(s) mounted
@@ -46,7 +47,7 @@ Ask the model to call `hello_mloader` or `hello_add`, or type `/mloader`. The ex
 
 Each plugin lives in its own directory under the profile:
 
-```
+```plaintext
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
@@ -57,7 +58,7 @@ A plugin directory contains a `mloader.plugin.json` manifest and its entry file.
 Two surfaces read the same snapshot:
 
 | Who | How |
-|---|---|
+| --- | --- |
 | You | the `/mloader` command |
 | The model | the `mloader_status` tool |
 
