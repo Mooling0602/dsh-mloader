@@ -63,10 +63,14 @@ Each plugin lives in its own directory under the profile:
 ```
 
 A plugin directory contains a `mloader.plugin.json` manifest and its entry file. Copy
-the directory in and restart dsh; the loader discovers it. The loader finds the
-current profile through dsh, so no path configuration is needed. Python plugins need
-Python 3.10 or later. The WASM backend is disabled by default; see
-[CONTEXT.md](CONTEXT.md) to enable it.
+the directory in while dsh runs: the loader watches the plugin roots, so a directory
+that appears is mounted and one that is deleted is unmounted, both without a restart.
+After editing the files of an installed plugin, run `/mloader reload <plugin-id>`. The
+loader finds the current profile through dsh, so no path configuration is needed.
+Python plugins need Python 3.10 or later. The WASM backend is disabled by default; see
+[CONTEXT.md](CONTEXT.md) to enable it. Watching is on by default. Set `watch: false`
+for the `dsh-mloader` id in the profile's `cordis.patch.yml` to turn it off, and a
+plugin added to the directory then needs a restart.
 
 ## Inspect and switch plugins
 

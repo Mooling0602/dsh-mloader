@@ -78,6 +78,7 @@ src/
   registrar.ts             per-plugin registration ledger and host tool factory
   serialize.ts             projection of live host objects into transportable data
   seed.ts                  release of the bundled example into the profile
+  watch.ts                 recursive watch on the plugin roots, debounced callback
   console.ts               terminal output channel, separate from ctx.logger
   http.ts                  optional operator HTTP routes behind the web server
   types.ts                 structural types of the host surface and plugin boundary
@@ -95,7 +96,7 @@ scripts/build-client.mjs   deterministic build of the committed client bundle
 client.js                  committed generated browser bundle
 tsconfig.client.json       compiler configuration for src/client
 seed/hello-mloader/        bundled example plugin: manifest and plugin.py
-test/                      fourteen self-contained suites and their fixtures
+test/                      16 self-contained suites and their fixtures
 docs/ABI.md                normative plugin contract
 ```
 
@@ -312,9 +313,11 @@ interactive tool call waiting longer than the harness allows hides the result.
 | `console.mjs` | 19 | terminal output levels and write failure tolerance | no |
 | `plugin-toggle.mjs` | 62 | runtime switches through the operator routes: real load and unload, manual enable of a manifest-disabled plugin, crash recovery, route removal and the non-web compatibility case | no |
 | `client-bundle.mjs` | 20 | generated bundle, slot identity, zh and en dictionaries, placement stylesheet, detail page subject gating, rendering states and switch requests | no |
+| `hot-refresh.mjs` | 31 | mounting a plugin directory installed at runtime, unmounting a deleted one, no reload on a file edit, recovery from a directory caught mid copy, bounded retry of a broken one, disabled and `autoEnable: false` policy, missing root, `watch: false` and watcher shutdown on teardown | no |
+| `output-inference.mjs` | 20 | result schema derived from a return annotation on both registration styles, the mapping table, explicit `output` precedence, and the host default for an absent, `Any` or unresolvable annotation | no |
 
-The baseline is 386 assertions across fourteen suites, 32 of them requiring a
-compiled `.wasm` fixture. A run without the two binaries reports 354 assertions passed
+The baseline is 437 assertions across 16 suites, 32 of them requiring a
+compiled `.wasm` fixture. A run without the two binaries reports 405 assertions passed
 and skips the two WebAssembly suites. Skipping is an environment gap, not a pass:
 those suites verify that a looping WebAssembly plugin cannot block the host, which is
 a safety property.
@@ -367,6 +370,7 @@ configuration belongs to the operator; third-party plugin authors do not set it.
 | `command` | `true` | Register the `/mloader` command group. `false` disables it; a string sets a custom command name matching `^[a-z][a-z0-9_-]*$`. |
 | `seedExamples` | `true` | Release the bundled example into the profile plugin directory on first start. |
 | `console` | `true` | Terminal output: `true` for lifecycle events, `'verbose'` for scan detail, `false` for silence. |
+| `watch` | `true` | Mount a plugin directory installed while the loader runs and unmount one that is deleted. `false` installs no watcher, so a new plugin needs a restart. |
 | `wasm.enabled` | `false` | Enable the WebAssembly backend. It is off by default. |
 
 `command` and `statusTool` are independent switches. The command also needs the
@@ -399,10 +403,15 @@ operator to restart, and check the following after the restart.
    A hang here means the event dispatch or one-way logging rule was broken.
 5. **One process per Python plugin.** `ps -ef | grep launch.py` shows one process per
    applied Python plugin, owned by the dsh process.
-6. **Crash isolation.** Kill one plugin process. Its tools fail with a tool error,
+6. **Hot refresh.** Copy a plugin directory into `<profile>/mloader/plugins` while dsh
+   runs. The terminal prints `[mloader] rescan added 1 and removed 0 plugin(s)` and
+   the mount line for the new plugin, and its tools appear without a restart. Delete
+   the directory again: the terminal prints `[mloader] unloaded <id>` and the tools
+   are revoked. With `watch: false` neither line appears.
+7. **Crash isolation.** Kill one plugin process. Its tools fail with a tool error,
    the other plugins keep working, dsh stays up, and the killed plugin reports
    `failed` in the status output.
-7. **Rollback.** Set `disabled: true` under the `dsh-mloader` id in the profile's
+8. **Rollback.** Set `disabled: true` under the `dsh-mloader` id in the profile's
    `cordis.patch.yml` and restart, or run
    `dsh plugin --profile web remove dsh-mloader`. Plugins under
    `<profile>/mloader/plugins` stay on disk either way.
@@ -517,6 +526,54 @@ failure explains why the rule is not optional.
   reload stops and starts in one step, so a separate unload line would describe
   something that did not happen.
 
+### 5.4a Watching the plugin roots
+
+- **The watch covers the set of plugin directories, not their contents.** A plugin
+  directory that appears is admitted by the same policy as boot, and one that
+  disappears is unloaded. Editing a manifest or an entry file leaves the running
+  plugin alone, because `fs.watch` reports a write as a `change` event while a
+  directory is created or removed with a `rename` event; the watcher reacts only to
+  `rename` and only for a directory entry. Reloading after an edit stays an explicit
+  `/mloader reload`.
+- **One recursive watcher per root.** Node 24 implements `recursive: true` with one
+  inotify watch per directory inside the root, so the kernel cost grows with the
+  number of plugin directories. Each watcher is unref'd, so a watcher never keeps the
+  process alive on its own.
+- **A missing root is watched through its nearest existing ancestor.** The ancestor
+  can be any number of levels up, and it also reports the creation of every directory
+  between the ancestor and the root. The file system root itself is refused, because
+  watching it would watch everything.
+- **`watch()` throw and the `error` event are both handled.** In this environment
+  `/proc/sys/fs/inotify/max_user_watches` is not readable (SELinux), so the limit
+  cannot be checked in advance. A refused watch is a warning line and no watching,
+  and an `error` event from an open watcher closes that watcher instead of leaving a
+  broken handle.
+- **Rescans are serialised and debounced.** The watcher collects events for 300 ms
+  before it calls back, and a callback that arrives during a running rescan queues
+  exactly one follow-up. Without the gate two rescans would race in `records` and
+  could start the same plugin twice.
+- **The first rescan waits for boot.** `apply()` returns before boot finished, so a
+  change during boot would diff against a `records` map that is still filling. The
+  rescan awaits the boot task first, and boot itself handles a directory that arrived
+  before it scanned.
+- **Bytecode and VCS directories are filtered out.** A Python plugin writes
+  `__pycache__` under its own directory while it starts, and the watcher must not
+  treat that as a plugin directory appearing or disappearing. `.git`, `node_modules`
+  and files ending in `.pyc` or `.pyo` are ignored for the same reason.
+- **A start that fails as the directory appears is retried with a fixed budget.** A
+  directory copy creates the manifest before it writes the entry file, so the first
+  start can fail on a file that arrives a moment later. The rescan path retries that
+  plugin after 750 ms, re-reading the manifest, and stops after three attempts with
+  `giving up on <id> after 3 retries`. The budget is per plugin id and is cleared by a
+  successful start, so a plugin that is genuinely broken stays `failed` instead of
+  being started in a loop.
+- **Teardown closes the watcher.** `teardown()` closes the handle before it stops the
+  records, and a callback that still fires afterwards returns immediately because
+  `disposed` and `aborted` are set. No rescan outlives the loader.
+- **`watch: false` installs no watcher at all.** The setting is read once at mount, so
+  the whole mechanism is absent rather than idle, and the suites that mutate a plugin
+  root after mount keep their deterministic behaviour.
+
 ### 5.5 Profile and plugin root resolution
 
 - **`ctx.baseUrl` is the authoritative profile source.** dsh sets it in
@@ -628,6 +685,13 @@ failure explains why the rule is not optional.
 - **`output.render` is rebuilt on the host side.** Functions cannot cross the plugin
   boundary, so the plugin declares `output.schema` and the loader supplies a
   renderer that turns the returned JSON value into a text block.
+- **The Python runtime infers `output` from the return annotation.** The host
+  validates a result against the declared schema and the default schema describes an
+  object, so a handler returning a bare string or number would fail after it ran.
+  Both registration styles call `_output_schema_from_annotation`, which reads the
+  annotation once at registration and sends no `output` when the annotation is
+  absent, is `Any`, fails to resolve, or names no expressible type. An explicit
+  `output` argument wins. The mapping table lives in `docs/ABI.md` §2.8.
 - **Unknown operations and events are rejected by name.** The rejection lists the
   whitelist so a plugin author can see what is allowed.
 - **Every registration goes through the ledger.** The ledger is the only path to a

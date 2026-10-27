@@ -135,6 +135,13 @@ The loader scans each configured root for `mloader.plugin.json`:
   plugin may therefore resolve its own resource files relative to the process
   working directory.
 
+The roots are watched while the loader runs. A plugin directory that appears is
+discovered and started by the same rules as one present at startup, and a directory
+that disappears is unloaded and its registrations are revoked. This applies to the set
+of directories only: writing to a manifest or to an entry file of an installed plugin
+has no effect until the plugin is reloaded. The operator turns watching off with
+`watch: false`, and a directory added while it is off needs a restart.
+
 ### 2.3 Python SDK
 
 The Python runtime is shipped in the loader repository under
@@ -169,6 +176,9 @@ Public names exported by `dsh_mloader_sdk`:
 | `HostUnavailable` | exception | The host channel is closed, or `ctx` is used outside a running plugin process. |
 | `PROTOCOL_VERSION` | integer | Wire protocol version, currently `1`. |
 | `__version__` | string | Version of the SDK package. |
+
+Both registration styles derive the result schema from the handler's return
+annotation when no `output` is given (§2.8).
 
 ### 2.4 Style A: Cordis aligned
 
@@ -249,6 +259,44 @@ effect: the manifest is the identity authority.
 
 `stdout` is the protocol channel only. A stray line that is not JSON is skipped and
 reported on `stderr`.
+
+### 2.8 Inferred result schemas (Python)
+
+The host validates a tool result against the declared `output` schema, and the default
+schema describes an object. A handler that returns a bare string, number or boolean
+therefore fails validation after it has run, with an error that names the value rather
+than the missing declaration. The Python runtime avoids that failure by deriving the
+schema from the handler's return annotation.
+
+Inference applies only to `ctx.tools.register` and `@tool` calls that omit `output`,
+and only when the handler carries a return annotation. It covers these shapes:
+
+| Annotation | Inferred schema |
+|---|---|
+| `str` | `{"type": "string"}` |
+| `int` | `{"type": "integer"}` |
+| `float` | `{"type": "number"}` |
+| `bool` | `{"type": "boolean"}` |
+| `dict` | `{"type": "object"}` |
+| `list` | `{"type": "array"}` |
+| `list[T]` | `{"type": "array", "items": <schema for T>}` |
+| `tuple[T, ...]` | `{"type": "array", "items": <schema for T>}` |
+| `Optional[T]` | The schema for `T`. |
+| `Union[T, U]` | `{"oneOf": [<schema for T>, <schema for U>]}` |
+
+A handler with no annotation, an annotation of `Any`, or an annotation this table
+cannot express keeps the host default, so the tool behaves exactly as it would without
+inference. Inference reads the annotation once during registration and never inspects
+a returned value, so it costs nothing at call time and cannot disagree with a handler
+whose return type varies.
+
+An annotation that fails to resolve, for example a forward reference to a name the
+module does not define, counts as a missing annotation. The registration proceeds with
+the host default instead of raising.
+
+An explicit `output` argument always wins. A plugin that needs a schema the table
+cannot express, such as one carrying `required` or `enum` constraints, states it
+directly.
 
 ## 3. ctx capability whitelist
 
@@ -527,6 +575,10 @@ discovered -> loaded -> applied -> disposed
   survive a reload.
 - A crashed plugin becomes `failed` and is not restarted automatically. An operator can
   reload it through the loader's optional `mloader` service or restart dsh.
+- A plugin whose directory is deleted while the loader runs moves to `disposed` and is
+  no longer listed. A plugin whose directory is created while the loader runs goes
+  through the same startup path as a plugin present at startup, including the
+  `enabled: false` and `autoEnable: false` rules.
 
 ## 6. Backend interface
 
@@ -747,3 +799,5 @@ available.
 8. It does not enable the WebAssembly backend by default, and it ships no bundled
    WebAssembly example.
 9. It does not restart a crashed plugin automatically.
+10. It does not watch the files inside an installed plugin. A changed manifest or entry
+    file takes effect only after a reload or a restart.

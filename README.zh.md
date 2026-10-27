@@ -60,10 +60,12 @@ dsh plugin --profile web remove dsh-mloader
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
-插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。把目录复制进去并重启
-dsh，加载器就会发现它。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。
-Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见
-[CONTEXT.md](CONTEXT.md)。
+插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：
+加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的
+文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要
+配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见
+[CONTEXT.md](CONTEXT.md)。监听默认开启；在 profile 的 `cordis.patch.yml` 里给 `dsh-mloader`
+这个 id 设置 `watch: false` 可以关掉，关掉之后新增插件需要重启 dsh。
 
 ## 查看与切换插件
 
