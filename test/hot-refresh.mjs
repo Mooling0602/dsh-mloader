@@ -43,6 +43,26 @@ const section = (title) => console.log(`\n${title}`)
 
 const tick = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * Wait until the log stops growing for longer than a watcher settle period.
+ *
+ * A directory event becomes one rescan after a quiet period, and a timer from an
+ * earlier section can fire after the next section began. A check that reads a log
+ * window therefore opens it on a quiet log instead of on a fixed delay.
+ *
+ * @param logger - Logger whose line count is watched.
+ * @param quietMs - How long the log must stay unchanged, defaulting to twice the
+ *   watcher settle period so that any pending timer has fired by then.
+ * @returns A promise resolved once the log has been quiet for that long.
+ */
+async function quiesce(logger, quietMs = 700) {
+  let previous = -1
+  while (logger.lines.length !== previous) {
+    previous = logger.lines.length
+    await tick(quietMs)
+  }
+}
+
 /** Poll until the predicate holds or the deadline passes. */
 async function waitFor(predicate, timeoutMs = 15000, intervalMs = 100) {
   const deadline = Date.now() + timeoutMs
@@ -193,6 +213,10 @@ async function main() {
     )
 
     section('3. Editing files of an installed plugin is not a directory change')
+    // A settle timer from an earlier section can fire after this one begins,
+    // so the observation window opens on a quiet log. The assertion itself stays
+    // absolute: no rescan at all may fall inside the window.
+    await quiesce(live.logger)
     const linesBeforeEdit = live.logger.lines.length
     await writeFile(join(liveRoot, 'python-hello', 'plugin.py'), '# edited without a restart\n')
     await tick(1200)
@@ -203,10 +227,16 @@ async function main() {
       live.tools.schemas().some((schema) => schema.name === 'py_greet'),
       live.tools.schemas().map((schema) => schema.name).join(','),
     )
-    const editRescans = live.logger.lines
-      .slice(linesBeforeEdit)
-      .filter((line) => line.includes('rescan'))
+    // The window covers exactly the write and the settling period that follows it.
+    const editLines = live.logger.lines.slice(linesBeforeEdit)
+    const editRescans = editLines.filter((line) => line.includes('rescan'))
     check('the edit triggers no rescan', editRescans.length === 0, editRescans.join(' | '))
+    // A reload stops the plugin and starts it again, which emits the ready line
+    // that the first start emitted. The reported ledger cannot show the restart,
+    // because a restarted plugin comes back with the same state and the same
+    // registrations, so the lifecycle line is the observable that does.
+    const editReloads = editLines.filter((line) => line.includes('ready ('))
+    check('the edit reloads no plugin', editReloads.length === 0, editReloads.join(' | '))
 
     section('4. A manifest-disabled plugin stays disabled when it appears')
     await writePythonPlugin(liveRoot, 'hot-disabled', { enabled: false })
