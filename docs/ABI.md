@@ -1,18 +1,12 @@
 # dsh-mloader plugin ABI v1
 
-This document is the normative contract for the loader, its backends and every
-external plugin. The loader and the backends implement it; a third-party plugin may
-rely on it. Statements here are requirements, not suggestions.
+This document is the normative contract for the loader, its backends and every external plugin. The loader and the backends implement it; a third-party plugin may rely on it. Statements here are requirements, not suggestions.
 
-The current wire protocol is version 1. A change to a frame shape, a manifest field
-or the capability whitelist is a contract change, and a change that crosses the
-process or thread boundary requires a protocol version bump.
+The current wire protocol is version 1. A change to a frame shape, a manifest field or the capability whitelist is a contract change, and a change that crosses the process or thread boundary requires a protocol version bump.
 
 Baseline: dsh `0.2.1-rc.3`, Cordis `4.0.5`.
 
-Operator configuration and implementation detail are not part of this contract. They
-live in [CONTEXT.md](../CONTEXT.md). User-facing instructions live in
-[README.md](../README.md).
+Operator configuration and implementation detail are not part of this contract. They live in [CONTEXT.md](../CONTEXT.md). User-facing instructions live in [README.md](../README.md).
 
 ## Contents
 
@@ -30,24 +24,13 @@ live in [CONTEXT.md](../CONTEXT.md). User-facing instructions live in
 
 ## 0. Design axioms
 
-1. **The loader is an ordinary Cordis plugin.** It does not change the dsh loader,
-   the bundle mechanism or `import()`, and it replaces no existing plugin.
-2. **An external plugin is not a Cordis plugin.** It creates no Cordis plugin entity,
-   no fiber node and no per-plugin `ctx` scope, and it never appears in a dsh plugin
-   list. It sends registration intents over the protocol in this document, and the
-   loader performs the real registrations on its own `ctx`.
-3. **The capability surface is a whitelist, not a passthrough.** Only the four
-   operations in §3 are reachable. Every other `ctx` facility is unavailable by
-   design.
-4. **Registrations are revocable.** Every registration a plugin causes belongs to
-   that plugin's ledger and is revoked when the plugin unloads.
-5. **External code never occupies the host main thread.** Python runs in a child
-   process, WebAssembly runs in a worker thread, and the host continues its own
-   execution chain without waiting for a plugin.
+1. **The loader is an ordinary Cordis plugin.** It does not change the dsh loader, the bundle mechanism or `import()`, and it replaces no existing plugin.
+2. **An external plugin is not a Cordis plugin.** It creates no Cordis plugin entity, no fiber node and no per-plugin `ctx` scope, and it never appears in a dsh plugin list. It sends registration intents over the protocol in this document, and the loader performs the real registrations on its own `ctx`.
+3. **The capability surface is a whitelist, not a passthrough.** Only the four operations in §3 are reachable. Every other `ctx` facility is unavailable by design.
+4. **Registrations are revocable.** Every registration a plugin causes belongs to that plugin's ledger and is revoked when the plugin unloads.
+5. **External code never occupies the host main thread.** Python runs in a child process, WebAssembly runs in a worker thread, and the host continues its own execution chain without waiting for a plugin.
 
-The consequence of axiom 2 is explicit: an external plugin has no per-plugin `ctx`
-isolation, cannot resolve host services through Cordis `inject`, and has no entry in
-plugin management. This is the trade that makes hosting non-Cordis code possible.
+The consequence of axiom 2 is explicit: an external plugin has no per-plugin `ctx` isolation, cannot resolve host services through Cordis `inject`, and has no entry in plugin management. This is the trade that makes hosting non-Cordis code possible.
 
 ## 1. Structure
 
@@ -71,21 +54,15 @@ dsh main process (Node, Cordis)
                     ctx.on(event, ...)       dsh sees a loader listener
 ```
 
-An external plugin sends declarations, not objects. The loader validates each
-declaration and turns it into a real registration on its own context. There is no
-`ctx.plugin()` call and no fiber node for an external plugin.
+An external plugin sends declarations, not objects. The loader validates each declaration and turns it into a real registration on its own context. There is no `ctx.plugin()` call and no fiber node for an external plugin.
 
-The tool names, event subscriptions and log entries that result from those
-declarations are visible to dsh exactly as if the loader had made them itself. The
-ledger remembers which registration belongs to which external plugin, so unloading
-one plugin revokes only its own registrations.
+The tool names, event subscriptions and log entries that result from those declarations are visible to dsh exactly as if the loader had made them itself. The ledger remembers which registration belongs to which external plugin, so unloading one plugin revokes only its own registrations.
 
 ## 2. Plugin declaration
 
 ### 2.1 Manifest: `mloader.plugin.json`
 
-The manifest is the authoritative source of plugin identity and backend selection.
-It lives next to the entry file.
+The manifest is the authoritative source of plugin identity and backend selection. It lives next to the entry file.
 
 ```json
 {
@@ -122,35 +99,17 @@ Fields that are not listed are ignored and do not reach the plugin.
 
 The loader scans each configured root for `mloader.plugin.json`:
 
-- A root may itself be a plugin directory. It may also contain plugin directories.
-  Both layouts are scanned.
-- Only directories are considered as plugin directories. A manifest directly in the
-  root and a manifest in each plugin subdirectory are both candidates; discovered
-  plugins are sorted by `id` after the scan.
-- An unreadable root, invalid JSON, a missing required field or an invalid id or
-  backend produces one error for that manifest. The other manifests still load.
-- A duplicate plugin id is an error on the later manifest. The first manifest in scan
-  order wins, because two records would compete for the same registrations.
-- The process working directory of a backend instance is the manifest directory. A
-  plugin may therefore resolve its own resource files relative to the process
-  working directory.
+- A root may itself be a plugin directory. It may also contain plugin directories. Both layouts are scanned.
+- Only directories are considered as plugin directories. A manifest directly in the root and a manifest in each plugin subdirectory are both candidates; discovered plugins are sorted by `id` after the scan.
+- An unreadable root, invalid JSON, a missing required field or an invalid id or backend produces one error for that manifest. The other manifests still load.
+- A duplicate plugin id is an error on the later manifest. The first manifest in scan order wins, because two records would compete for the same registrations.
+- The process working directory of a backend instance is the manifest directory. A plugin may therefore resolve its own resource files relative to the process working directory.
 
-The roots are watched while the loader runs. A plugin directory that appears is
-discovered and started by the same rules as one present at startup, and a directory
-that disappears is unloaded and its registrations are revoked. This applies to the set
-of directories only: writing to a manifest or to an entry file of an installed plugin
-has no effect until the plugin is reloaded. The operator turns watching off with
-`watch: false`, and a directory added while it is off needs a restart.
+The roots are watched while the loader runs. A plugin directory that appears is discovered and started by the same rules as one present at startup, and a directory that disappears is unloaded and its registrations are revoked. This applies to the set of directories only: writing to a manifest or to an entry file of an installed plugin has no effect until the plugin is reloaded. The operator turns watching off with `watch: false`, and a directory added while it is off needs a restart.
 
 ### 2.3 Python SDK
 
-The Python runtime is shipped in the loader repository under
-`src/runtime/python_sdk/` and is additionally MIT licensed. It is a flat package with
-import name `dsh_mloader_sdk`, standard library only, requiring Python 3.10 or later.
-The package is split into the modules `channel`, `context`, `errors`, `runtime` and
-`version`. Plugin code normally imports the public names from the package root, and
-those modules are also importable directly, for example
-`from dsh_mloader_sdk.context import Context`.
+The Python runtime is shipped in the loader repository under `src/runtime/python_sdk/` and is additionally MIT licensed. It is a flat package with import name `dsh_mloader_sdk`, standard library only, requiring Python 3.10 or later. The package is split into the modules `channel`, `context`, `errors`, `runtime` and `version`. Plugin code normally imports the public names from the package root, and those modules are also importable directly, for example `from dsh_mloader_sdk.context import Context`.
 
 The loader starts a Python plugin as:
 
@@ -158,10 +117,7 @@ The loader starts a Python plugin as:
 <pythonBin> -u <loader>/src/runtime/python_sdk/launch.py <plugin entry>
 ```
 
-with the plugin base directory as working directory. `launch.py` loads the package
-from the directory that contains it and registers it in `sys.modules`, so
-`from dsh_mloader_sdk import ...` always resolves to the copy shipped beside
-`launch.py`, even if a package with the same name is installed in the interpreter.
+with the plugin base directory as working directory. `launch.py` loads the package from the directory that contains it and registers it in `sys.modules`, so `from dsh_mloader_sdk import ...` always resolves to the copy shipped beside `launch.py`, even if a package with the same name is installed in the interpreter.
 
 Public names exported by `dsh_mloader_sdk`:
 
@@ -177,8 +133,7 @@ Public names exported by `dsh_mloader_sdk`:
 | `PROTOCOL_VERSION` | integer | Wire protocol version, currently `1`. |
 | `__version__` | string | Version of the SDK package. |
 
-Both registration styles derive the result schema from the handler's return
-annotation when no `output` is given (§2.8).
+Both registration styles derive the result schema from the handler's return annotation when no `output` is given (§2.8).
 
 ### 2.4 Style A: Cordis aligned
 
@@ -213,8 +168,7 @@ def apply(ctx):
     ctx.effect.register("cleanup", lambda: ctx.logger.info("my-plugin unloading"))
 ```
 
-A module level `apply` function is also honored when it is not decorated with
-`@plugin`. A decorated entry function takes precedence over a plain `apply`.
+A module level `apply` function is also honored when it is not decorated with `@plugin`. A decorated entry function takes precedence over a plain `apply`.
 
 ### 2.5 Style B: declarative
 
@@ -237,14 +191,11 @@ def add(args):
     return {"sum": args["a"] + args["b"]}
 ```
 
-A module level `TOOLS` list is honored as well. Each entry requires `name`,
-`description` and `handler`; `parameters`, `output` and `timeoutMs` are optional.
+A module level `TOOLS` list is honored as well. Each entry requires `name`, `description` and `handler`; `parameters`, `output` and `timeoutMs` are optional.
 
 ### 2.6 Mixing and ordering
 
-Both styles may be mixed in one plugin. Declared tools are registered first, then the
-entry function runs. `@plugin(name="...")` is accepted for readability but has no
-effect: the manifest is the identity authority.
+Both styles may be mixed in one plugin. Declared tools are registered first, then the entry function runs. `@plugin(name="...")` is accepted for readability but has no effect: the manifest is the identity authority.
 
 ### 2.7 Runtime errors
 
@@ -257,19 +208,13 @@ effect: the manifest is the identity authority.
 | A cleanup raises | The traceback goes to `stderr` and the remaining cleanups still run. |
 | An unsupported host operation arrives | The reply is `ok:false`. |
 
-`stdout` is the protocol channel only. A stray line that is not JSON is skipped and
-reported on `stderr`.
+`stdout` is the protocol channel only. A stray line that is not JSON is skipped and reported on `stderr`.
 
 ### 2.8 Inferred result schemas (Python)
 
-The host validates a tool result against the declared `output` schema, and the default
-schema describes an object. A handler that returns a bare string, number or boolean
-therefore fails validation after it has run, with an error that names the value rather
-than the missing declaration. The Python runtime avoids that failure by deriving the
-schema from the handler's return annotation.
+The host validates a tool result against the declared `output` schema, and the default schema describes an object. A handler that returns a bare string, number or boolean therefore fails validation after it has run, with an error that names the value rather than the missing declaration. The Python runtime avoids that failure by deriving the schema from the handler's return annotation.
 
-Inference applies only to `ctx.tools.register` and `@tool` calls that omit `output`,
-and only when the handler carries a return annotation. It covers these shapes:
+Inference applies only to `ctx.tools.register` and `@tool` calls that omit `output`, and only when the handler carries a return annotation. It covers these shapes:
 
 | Annotation | Inferred schema |
 |---|---|
@@ -284,19 +229,11 @@ and only when the handler carries a return annotation. It covers these shapes:
 | `Optional[T]` | The schema for `T`. |
 | `Union[T, U]` | `{"oneOf": [<schema for T>, <schema for U>]}` |
 
-A handler with no annotation, an annotation of `Any`, or an annotation this table
-cannot express keeps the host default, so the tool behaves exactly as it would without
-inference. Inference reads the annotation once during registration and never inspects
-a returned value, so it costs nothing at call time and cannot disagree with a handler
-whose return type varies.
+A handler with no annotation, an annotation of `Any`, or an annotation this table cannot express keeps the host default, so the tool behaves exactly as it would without inference. Inference reads the annotation once during registration and never inspects a returned value, so it costs nothing at call time and cannot disagree with a handler whose return type varies.
 
-An annotation that fails to resolve, for example a forward reference to a name the
-module does not define, counts as a missing annotation. The registration proceeds with
-the host default instead of raising.
+An annotation that fails to resolve, for example a forward reference to a name the module does not define, counts as a missing annotation. The registration proceeds with the host default instead of raising.
 
-An explicit `output` argument always wins. A plugin that needs a schema the table
-cannot express, such as one carrying `required` or `enum` constraints, states it
-directly.
+An explicit `output` argument always wins. A plugin that needs a schema the table cannot express, such as one carrying `required` or `enum` constraints, states it directly.
 
 ## 3. ctx capability whitelist
 
@@ -309,15 +246,9 @@ directly.
 | 3 | `ctx.logger.{debug,info,warn,error}(message, data?)` | `logger.log` | One-way log notification. No reply is awaited. |
 | 4 | `ctx.effect.register(label, cleanup?)` | `effect.register` | Registers a cleanup that runs when the plugin unloads. |
 
-Nothing else is reachable. `ctx.session`, `ctx.llm`, `ctx.subprocess`, `ctx.commands`
-and arbitrary `ctx.*` passthrough are not part of the contract, and a plugin cannot
-obtain them.
+Nothing else is reachable. `ctx.session`, `ctx.llm`, `ctx.subprocess`, `ctx.commands` and arbitrary `ctx.*` passthrough are not part of the contract, and a plugin cannot obtain them.
 
-Slash commands are deliberately not available to external plugins. A command is a
-human-facing entry in a global namespace, so letting any external plugin register one
-would pollute the user's command list. The loader's own `/mloader` command is a
-registration made by the loader as a regular Cordis plugin, not a capability offered
-to plugins.
+Slash commands are deliberately not available to external plugins. A command is a human-facing entry in a global namespace, so letting any external plugin register one would pollute the user's command list. The loader's own `/mloader` command is a registration made by the loader as a regular Cordis plugin, not a capability offered to plugins.
 
 ### 3.2 Tool registration
 
@@ -334,12 +265,9 @@ to plugins.
 The loader registers the prepared definition on its own context:
 
 - A duplicate tool name within the same plugin is rejected.
-- A name that dsh already has registered is rejected by the tool registry, and the
-  registration fails.
-- `output.render` cannot cross the plugin boundary, so the loader rebuilds it. The
-  renderer turns the returned JSON value into a text block.
-- A tool result must be JSON serializable. The handler's exception becomes a tool
-  error and does not kill the process.
+- A name that dsh already has registered is rejected by the tool registry, and the registration fails.
+- `output.render` cannot cross the plugin boundary, so the loader rebuilds it. The renderer turns the returned JSON value into a text block.
+- A tool result must be JSON serializable. The handler's exception becomes a tool error and does not kill the process.
 
 ### 3.3 Event subscriptions
 
@@ -358,34 +286,18 @@ The only subscribable events are:
 | `session/created` | A session is created. |
 | `session/disposed` | A session is disposed. |
 
-- A subscription to an event outside this list is rejected, and the rejection names
-  the whitelist.
+- A subscription to an event outside this list is rejected, and the rejection names the whitelist.
 - A plugin may subscribe to each event once. A duplicate subscription is rejected.
-- A subscription is observational. The handler return value does not change the host
-  execution or the tool result, and the host chain advances whether or not the plugin
-  answers.
-- A handler must return promptly and must not wait for the host. The host is
-  delivering the event and is not serving further requests from that plugin, so a
-  synchronous host request from inside a handler deadlocks both sides. Logging is the
-  exception: it is a one-way notification and is safe from inside a handler.
-- Handler arity: zero parameters calls `handler()`, exactly one calls
-  `handler(first)`, and more than one calls `handler(*args)`.
+- A subscription is observational. The handler return value does not change the host execution or the tool result, and the host chain advances whether or not the plugin answers.
+- A handler must return promptly and must not wait for the host. The host is delivering the event and is not serving further requests from that plugin, so a synchronous host request from inside a handler deadlocks both sides. Logging is the exception: it is a one-way notification and is safe from inside a handler.
+- Handler arity: zero parameters calls `handler()`, exactly one calls `handler(first)`, and more than one calls `handler(*args)`.
 - An event with no subscribed handler is acknowledged with a null result.
 
 ### 3.4 Event payload projection
 
-Every argument that crosses the process or thread boundary is projected into pure
-data first. The projection replaces cycles, functions and host objects with markers
-and caps depth at 6, arrays at 100 elements, object keys at 100 and strings at 4000
-characters. The markers are `[Circular]`, `[Function]`, `[MaxDepth]`, `[Unreadable]`
-and `[Truncated]`. An `AbortSignal` becomes
-`{ "$type": "AbortSignal", "aborted": true|false, "reason": ... }`; the reason is
-present only when the host signal has one. An `Error` becomes
-`{ "$type": <name>, "message": ... }`.
+Every argument that crosses the process or thread boundary is projected into pure data first. The projection replaces cycles, functions and host objects with markers and caps depth at 6, arrays at 100 elements, object keys at 100 and strings at 4000 characters. The markers are `[Circular]`, `[Function]`, `[MaxDepth]`, `[Unreadable]` and `[Truncated]`. An `AbortSignal` becomes `{ "$type": "AbortSignal", "aborted": true|false, "reason": ... }`; the reason is present only when the host signal has one. An `Error` becomes `{ "$type": <name>, "message": ... }`.
 
-For `tools/execute`, `tools/pre-execute`, `tools/post-execute`, `tools/result` and
-`tools/change`, the first argument is a live host execution object. It is projected
-into this stable shape:
+For `tools/execute`, `tools/pre-execute`, `tools/post-execute`, `tools/result` and `tools/change`, the first argument is a live host execution object. It is projected into this stable shape:
 
 ```jsonc
 {
@@ -401,47 +313,35 @@ into this stable shape:
 }
 ```
 
-Only scalar `id`, `name`, `kind` and `label` are copied from the agent; the agent
-tree is never exposed. Optional fields are present only when the host value has them.
+Only scalar `id`, `name`, `kind` and `label` are copied from the agent; the agent tree is never exposed. Optional fields are present only when the host value has them.
 
 ### 3.5 JSON Schema subset
 
-Tool parameters and tool output use the restricted schema subset the harness
-accepts:
+Tool parameters and tool output use the restricted schema subset the harness accepts:
 
-- **Constraint keywords:** `type`, `oneOf`, `properties`, `required`,
-  `additionalProperties`, `items`, `enum`, `const`.
+- **Constraint keywords:** `type`, `oneOf`, `properties`, `required`, `additionalProperties`, `items`, `enum`, `const`.
 - **Annotation keywords:** `description`, `title`, `default`, `examples`.
 - **Types:** `object`, `array`, `string`, `number`, `integer`, `boolean`, `null`.
 - A schema node must be an object. A node cannot declare both `type` and `oneOf`.
-- `properties`, `items` and `oneOf` are traversed recursively, and a circular schema
-  is rejected.
+- `properties`, `items` and `oneOf` are traversed recursively, and a circular schema is rejected.
 
-Everything else is rejected, including `format`, `minimum`, `maximum`, `pattern`,
-`$ref`, `anyOf`, `allOf`, `not`, `patternProperties` and `definitions`. The loader
-validates before registering and reports the plugin id, the tool name and the schema
-path, so a violation is attributable.
+Everything else is rejected, including `format`, `minimum`, `maximum`, `pattern`, `$ref`, `anyOf`, `allOf`, `not`, `patternProperties` and `definitions`. The loader validates before registering and reports the plugin id, the tool name and the schema path, so a violation is attributable.
 
 ## 4. RPC protocol
 
 ### 4.1 Transport (Python backend)
 
-- One JSON frame per line, UTF-8, terminated by `\n`. This is not the LSP
-  `Content-Length` framing.
-- `stdout` is the protocol channel. Diagnostics go to `stderr`, which the loader
-  forwards to its logger.
+- One JSON frame per line, UTF-8, terminated by `\n`. This is not the LSP `Content-Length` framing.
+- `stdout` is the protocol channel. Diagnostics go to `stderr`, which the loader forwards to its logger.
 - The child runs with `PYTHONUNBUFFERED=1`.
+- The runtime reconfigures `stdin`, `stdout` and `stderr` to UTF-8 before it reads or writes a frame, so `PYTHONIOENCODING` and the locale cannot select another codec. A byte that is not valid UTF-8 decodes to the replacement character, which leaves a line the runtime skips, and a character UTF-8 cannot carry is written as a backslash escape, which keeps the frame parseable.
 - The process is long lived. It is not started per call.
 - The working directory is the plugin base directory.
-- The inherited environment is sanitized before the process starts: variables whose
-  names match `KEY`, `PASSWORD`, `SECRET` or `TOKEN` (case-insensitive), and any
-  variable starting with `DSH_`, are removed. The manifest `env` object is applied
-  afterwards and may set any value.
+- The inherited environment is sanitized before the process starts: variables whose names match `KEY`, `PASSWORD`, `SECRET` or `TOKEN` (case-insensitive), and any variable starting with `DSH_`, are removed. The manifest `env` object is applied afterwards and may set any value.
 
 ### 4.2 Frames
 
-Every frame carries `"v": 1`. Request identifiers are matched by `id`; identifiers in
-the two directions are independent.
+Every frame carries `"v": 1`. Request identifiers are matched by `id`; identifiers in the two directions are independent.
 
 Host to plugin request:
 
@@ -469,16 +369,11 @@ Reply in either direction:
 {"v":1,"id":1,"ok":false,"error":{"message":"reason","kind":"timeout|transport"}}
 ```
 
-A `logger.log` frame carries `"notification": true`. It never receives a reply, and a
-failure to process it is only logged.
+A `logger.log` frame carries `"notification": true`. It never receives a reply, and a failure to process it is only logged.
 
-The `kind` field appears only on host generated failures: `timeout` when a deadline
-expired and `transport` when the frame could not be delivered. A rejection produced
-by a plugin carries `message` only.
+The `kind` field appears only on host generated failures: `timeout` when a deadline expired and `transport` when the frame could not be delivered. A rejection produced by a plugin carries `message` only.
 
-A notification frame is processed and never answered. Every request frame receives
-exactly one reply. A reply for an unknown id and a frame that is neither a request nor
-a reply are logged and ignored; neither disturbs the channel.
+A notification frame is processed and never answered. Every request frame receives exactly one reply. A reply for an unknown id and a frame that is neither a request nor a reply are logged and ignored; neither disturbs the channel.
 
 Host payloads:
 
@@ -499,8 +394,7 @@ Plugin payloads:
 | `logger.log` | `level` (`debug`, `info`, `warn` or `error`), `message`, optional `data`. |
 | `effect.register` | `label`. |
 
-An operation outside these lists is rejected with `ok:false` and an error message
-that names the whitelist.
+An operation outside these lists is rejected with `ok:false` and an error message that names the whitelist.
 
 ### 4.3 Handshake and call sequence
 
@@ -523,12 +417,9 @@ host                                    plugin
  |---- dispose --------------------------->|  run cleanups, exit
 ```
 
-Registration is host executed: the plugin requests it, and the host performs the real
-registration and records the disposer in the plugin's ledger.
+Registration is host executed: the plugin requests it, and the host performs the real registration and records the disposer in the plugin's ledger.
 
-The runtime does not validate the manifest. Manifest validation happens during
-discovery in the loader, before a backend instance exists. The boot step only loads
-the plugin entry module and replies with the plugin id and the Python version.
+The runtime does not validate the manifest. Manifest validation happens during discovery in the loader, before a backend instance exists. The boot step only loads the plugin entry module and replies with the plugin id and the Python version.
 
 ### 4.4 Timeouts and failures
 
@@ -542,8 +433,7 @@ the plugin entry module and replies with the plugin id and the Python version.
 | A non-protocol line appears on `stdout` | The line is skipped and a warning is logged. The plugin keeps running. |
 | `dispose` does not answer within 1000 ms | The loader sends SIGTERM, waits at most 2000 ms, then sends SIGKILL. |
 
-The two deadlines come from the manifest: `timeouts.startupMs` covers `boot` and
-`apply`, and `timeouts.callMs` covers `tool.call` and event delivery.
+The two deadlines come from the manifest: `timeouts.startupMs` covers `boot` and `apply`, and `timeouts.callMs` covers `tool.call` and event delivery.
 
 ## 5. Lifecycle and ownership
 
@@ -563,28 +453,16 @@ discovered -> loaded -> applied -> disposed
 | `failed` | A startup, apply or runtime failure occurred. Registrations are revoked. |
 | `disposed` | The plugin is unloaded and its ledger is closed. |
 
-- Each registration is recorded in the plugin's ledger by owner. Unloading a plugin
-  revokes its registrations in reverse order; a reload does the same before starting
-  a new instance.
-- A registration attempted after the ledger is closed is disposed immediately rather
-  than left dangling.
-- A tool call for a plugin that is not `applied` fails with an error that names the
-  current state.
-- `reload` revokes the ledger, stops the backend instance and starts a fresh one. The
-  plugin module is imported again in the new process, so module level state does not
-  survive a reload.
-- A crashed plugin becomes `failed` and is not restarted automatically. An operator can
-  reload it through the loader's optional `mloader` service or restart dsh.
-- A plugin whose directory is deleted while the loader runs moves to `disposed` and is
-  no longer listed. A plugin whose directory is created while the loader runs goes
-  through the same startup path as a plugin present at startup, including the
-  `enabled: false` and `autoEnable: false` rules.
+- Each registration is recorded in the plugin's ledger by owner. Unloading a plugin revokes its registrations in reverse order; a reload does the same before starting a new instance.
+- A registration attempted after the ledger is closed is disposed immediately rather than left dangling.
+- A tool call for a plugin that is not `applied` fails with an error that names the current state.
+- `reload` revokes the ledger, stops the backend instance and starts a fresh one. The plugin module is imported again in the new process, so module level state does not survive a reload.
+- A crashed plugin becomes `failed` and is not restarted automatically. An operator can reload it through the loader's optional `mloader` service or restart dsh.
+- A plugin whose directory is deleted while the loader runs moves to `disposed` and is no longer listed. A plugin whose directory is created while the loader runs goes through the same startup path as a plugin present at startup, including the `enabled: false` and `autoEnable: false` rules.
 
 ## 6. Backend interface
 
-A backend hosts exactly one external plugin. The backend kind comes from
-`manifest.backend`. The loader constructs an instance per plugin and drives it
-through this surface, declared structurally in `src/types.ts`:
+A backend hosts exactly one external plugin. The backend kind comes from `manifest.backend`. The loader constructs an instance per plugin and drives it through this surface, declared structurally in `src/types.ts`:
 
 ```ts
 interface BackendInstance {
@@ -627,14 +505,11 @@ Both backends satisfy the same contract. Their physical differences are:
 | Timeout enforcement | Request deadline; kill the process on a boot timeout | Terminate the worker |
 | Synchronous host callback | Possible in principle, not used by the SDK | Not possible; the worker cannot call back across threads |
 
-A backend must never let plugin code occupy the host main thread, must reap the
-process or worker it created when startup fails, and must surface a crash by failing
-pending calls so the loader can revoke the plugin's registrations.
+A backend must never let plugin code occupy the host main thread, must reap the process or worker it created when startup fails, and must surface a crash by failing pending calls so the loader can revoke the plugin's registrations.
 
 ## 7. WebAssembly core ABI
 
-The core ABI depends on the WebAssembly core specification only. It does not require
-WASI for a plugin to work.
+The core ABI depends on the WebAssembly core specification only. It does not require WASI for a plugin to work.
 
 ### 7.1 Required exports
 
@@ -646,41 +521,25 @@ WASI for a plugin to work.
 | `dsh_call` | `(ptr: i32, len: i32) -> i32` | Handle one request and return the result byte length. |
 | `dsh_result_ptr` | `() -> i32` | Return the pointer of the result buffer. |
 
-A module missing any of these exports fails to initialize, and the plugin is marked
-`failed`.
+A module missing any of these exports fails to initialize, and the plugin is marked `failed`.
 
 ### 7.2 Request and result contract
 
-- A request is a UTF-8 JSON object `{"op": "...", "payload": {...}}`. The loader
-  allocates `len` bytes with `dsh_alloc`, writes the request, and calls `dsh_call`.
+- A request is a UTF-8 JSON object `{"op": "...", "payload": {...}}`. The loader allocates `len` bytes with `dsh_alloc`, writes the request, and calls `dsh_call`.
 - The operation and payload shapes are the same as the host payloads in §4.2.
-- After `dsh_call` returns, the result is the JSON text at `dsh_result_ptr()` with the
-  returned length. The plugin writes either
-  `{"ok": true, "result": ...}` or `{"ok": false, "error": {"message": "..."}}`.
-- The loader calls `dsh_free(ptr, len)` for the request buffer after `dsh_call`
-  returns. The result buffer is owned by the plugin and must remain valid until the
-  next request.
-- The loader sends `boot`, `apply`, `tool.call`, `event` and `dispose` operations with
-  the same payloads as the Python backend. In reply to `apply`, the plugin returns
-  `{"tools": [...], "events": [...]}` as its result, and the loader performs the
-  registrations.
-- Invalid JSON from the plugin, or a result whose `ok` is `false`, becomes a failed
-  call for the loader.
+- After `dsh_call` returns, the result is the JSON text at `dsh_result_ptr()` with the returned length. The plugin writes either `{"ok": true, "result": ...}` or `{"ok": false, "error": {"message": "..."}}`.
+- The loader calls `dsh_free(ptr, len)` for the request buffer after `dsh_call` returns. The result buffer is owned by the plugin and must remain valid until the next request.
+- The loader sends `boot`, `apply`, `tool.call`, `event` and `dispose` operations with the same payloads as the Python backend. In reply to `apply`, the plugin returns `{"tools": [...], "events": [...]}` as its result, and the loader performs the registrations.
+- Invalid JSON from the plugin, or a result whose `ok` is `false`, becomes a failed call for the loader.
 
 ### 7.3 WASI modules
 
 WASI is not part of the supported contract.
 
-- A module that imports `wasi_snapshot_preview1` is instantiated with a minimal
-  preview1 provider: no preopened directories, no environment variables, no
-  arguments, and exit handling that does not terminate the host. If the module
-  exports `_start`, it is called once for initialization.
-- Go `wasip1` modules use a command model: `_start` may call `proc_exit`, so repeated
-  calls after initialization are outside the supported behavior.
-- Reactor style modules are the supported shape, for example Rust, C or Zig built for
-  `wasm32-unknown-unknown`.
-- No custom host imports are part of v1. A module that imports anything other than the
-  WASI preview1 namespace fails to instantiate.
+- A module that imports `wasi_snapshot_preview1` is instantiated with a minimal preview1 provider: no preopened directories, no environment variables, no arguments, and exit handling that does not terminate the host. If the module exports `_start`, it is called once for initialization.
+- Go `wasip1` modules use a command model: `_start` may call `proc_exit`, so repeated calls after initialization are outside the supported behavior.
+- Reactor style modules are the supported shape, for example Rust, C or Zig built for `wasm32-unknown-unknown`.
+- No custom host imports are part of v1. A module that imports anything other than the WASI preview1 namespace fails to instantiate.
 
 ## 8. Security model
 
@@ -694,18 +553,11 @@ WASI is not part of the supported contract.
 | Memory limit | None imposed by the loader | `maxOldGenerationSizeMb` is 256 |
 | Environment | Sanitized; manifest `env` is applied afterwards | Not applicable |
 
-The Python sandbox is process isolation, not permission isolation. A Python plugin can
-read and write files and open network connections, so only trusted plugins should run.
-The WebAssembly isolation prevents a hang from blocking the host and prevents active
-IO, but it is not a security boundary against memory corruption in the module. Only
-trusted plugins should run.
+The Python sandbox is process isolation, not permission isolation. A Python plugin can read and write files and open network connections, so only trusted plugins should run. The WebAssembly isolation prevents a hang from blocking the host and prevents active IO, but it is not a security boundary against memory corruption in the module. Only trusted plugins should run.
 
-Environment sanitization reduces accidental credential inheritance; it is not a
-security control that a plugin cannot bypass by reading files.
+Environment sanitization reduces accidental credential inheritance; it is not a security control that a plugin cannot bypass by reading files.
 
-A crashing or hanging plugin must not take dsh down. The loader revokes that plugin's
-registrations, marks it `failed`, and kills or terminates its process or worker. The
-other plugins and the host keep running.
+A crashing or hanging plugin must not take dsh down. The loader revokes that plugin's registrations, marks it `failed`, and kills or terminates its process or worker. The other plugins and the host keep running.
 
 ## 9. Installation layout
 
@@ -725,12 +577,9 @@ External plugins are installed under the profile, not inside the loader package:
         hello.wasm
 ```
 
-The directory name is a convention. The plugin id comes from the manifest, not from
-the directory name.
+The directory name is a convention. The plugin id comes from the manifest, not from the directory name.
 
-The profile's `node_modules` is not a supported install location. It is owned by the
-package manager, and `pnpm install` or `pnpm prune` can rebuild it, so hand-placed
-plugins there are not stable.
+The profile's `node_modules` is not a supported install location. It is owned by the package manager, and `pnpm install` or `pnpm prune` can rebuild it, so hand-placed plugins there are not stable.
 
 ### 9.1 Roots resolution
 
@@ -742,62 +591,37 @@ plugins there are not stable.
 | `./x` or `x` | Resolved against the profile directory, or against the current working directory when no profile is detected. |
 | `/abs/path` | Used as is. |
 
-Unless `profilePlugins` is `false`, `<profile>/mloader/plugins` is appended as the
-last root when the profile is known. Duplicate roots are removed, so listing the
-profile directory again does not load a plugin twice.
+Unless `profilePlugins` is `false`, `<profile>/mloader/plugins` is appended as the last root when the profile is known. Duplicate roots are removed, so listing the profile directory again does not load a plugin twice.
 
-The profile directory is detected from `ctx.baseUrl`, which dsh sets to the file URL
-of the directory containing the active `cordis.yml`. If that is unavailable, the
-loader falls back to `DSH_PROFILE_DIR`, then `DSH_HOME` and `DSH_PROFILE`, then a scan
-of `~/.dsh/profiles` that succeeds only when exactly one candidate looks like a
-profile. A profile is recognized by having both `package.json` and `cordis.yml`. When
-no profile is detected, the loader warns and uses only the explicit roots.
+The profile directory is detected from `ctx.baseUrl`, which dsh sets to the file URL of the directory containing the active `cordis.yml`. If that is unavailable, the loader falls back to `DSH_PROFILE_DIR`, then `DSH_HOME` and `DSH_PROFILE`, then a scan of `~/.dsh/profiles` that succeeds only when exactly one candidate looks like a profile. A profile is recognized by having both `package.json` and `cordis.yml`. When no profile is detected, the loader warns and uses only the explicit roots.
 
 ### 9.2 Bundled example
 
-When a profile is detected and `seedExamples` is `true`, the loader copies the
-bundled example `seed/hello-mloader/` into `<profile>/mloader/plugins/` on startup,
-before discovery. If the destination directory exists, the example is skipped as a
-whole and nothing is overwritten. `seedExamples: false` performs no file system work.
+When a profile is detected and `seedExamples` is `true`, the loader copies the bundled example `seed/hello-mloader/` into `<profile>/mloader/plugins/` on startup, before discovery. If the destination directory exists, the example is skipped as a whole and nothing is overwritten. `seedExamples: false` performs no file system work.
 
-Do not run `dsh --from-default-profile` against a profile that holds plugins: that
-command deletes the whole profile directory, including `mloader/plugins`.
+Do not run `dsh --from-default-profile` against a profile that holds plugins: that command deletes the whole profile directory, including `mloader/plugins`.
 
-Loader configuration is operator material. The key reference is in
-[CONTEXT.md](../CONTEXT.md), and the packaged default layer is `cordis.patch.yml`.
+Loader configuration is operator material. The key reference is in [CONTEXT.md](../CONTEXT.md), and the packaged default layer is `cordis.patch.yml`.
 
 ### 9.3 Operator surfaces
 
 dsh-mloader exposes three operator surfaces for the person running dsh:
 
-- the External plugins section on the dsh Plugins page, which lists the hosted plugins
-  and switches them on and off at runtime;
-- two HTTP routes under `/mloader` that serve the plugin list and the runtime switch to
-  the browser half;
+- the External plugins section on the dsh Plugins page, which lists the hosted plugins and switches them on and off at runtime;
+- two HTTP routes under `/mloader` that serve the plugin list and the runtime switch to the browser half;
 - the `/mloader` slash command group.
 
-They are internal to dsh-mloader and are not part of the external plugin ABI. An
-external plugin cannot call them, cannot register on them, and must not depend on
-their request or response shapes. The browser section and the HTTP routes exist only
-in a web profile; a non-web dsh profile mounts the loader and hosts plugins without
-them, and the slash command exists only when the optional commands service is
-available.
+They are internal to dsh-mloader and are not part of the external plugin ABI. An external plugin cannot call them, cannot register on them, and must not depend on their request or response shapes. The browser section and the HTTP routes exist only in a web profile; a non-web dsh profile mounts the loader and hosts plugins without them, and the slash command exists only when the optional commands service is available.
 
 ## 10. What v1 does not do
 
 1. It does not replace Cordis, change the dsh loader or touch the bundle mechanism.
-2. It does not support calls between external plugins, a service registry, or
-   Cordis-style `inject` resolution of host services.
-3. It does not provide a Python permission sandbox. Python plugins get process
-   isolation only.
-4. It does not persist plugin state. Plugins are discovered and mounted again on each
-   start.
+2. It does not support calls between external plugins, a service registry, or Cordis-style `inject` resolution of host services.
+3. It does not provide a Python permission sandbox. Python plugins get process isolation only.
+4. It does not persist plugin state. Plugins are discovered and mounted again on each start.
 5. It does not support a plugin UI or a client half.
 6. It does not allow a WebAssembly plugin to call back into the host synchronously.
-7. It does not expose slash commands or any capability outside the §3 whitelist to
-   external plugins.
-8. It does not enable the WebAssembly backend by default, and it ships no bundled
-   WebAssembly example.
+7. It does not expose slash commands or any capability outside the §3 whitelist to external plugins.
+8. It does not enable the WebAssembly backend by default, and it ships no bundled WebAssembly example.
 9. It does not restart a crashed plugin automatically.
-10. It does not watch the files inside an installed plugin. A changed manifest or entry
-    file takes effect only after a reload or a restart.
+10. It does not watch the files inside an installed plugin. A changed manifest or entry file takes effect only after a reload or a restart.
