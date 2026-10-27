@@ -344,7 +344,7 @@ Then verify the copy from the SDK repository root:
 
 ```bash
 uv sync
-uv run python -m unittest discover -s tests  # 38 tests
+uv run python -m unittest discover -s tests
 uv run python -c "import dsh_mloader_sdk; print(dsh_mloader_sdk.__version__)"
 uv build --wheel                     # contains every runtime file, py.typed and LICENSE
 diff -r <dsh-mloader checkout>/src/runtime/python_sdk src/dsh-mloader-sdk
