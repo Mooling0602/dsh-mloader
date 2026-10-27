@@ -18,6 +18,11 @@
  * manifest on disk is never rewritten, so the next start follows the manifest
  * again.
  *
+ * The roots are watched while the loader runs, so a plugin directory that is
+ * installed or deleted is mounted or unmounted without a restart. Only the set of
+ * directories is followed: editing a manifest or an entry file still needs an
+ * explicit reload.
+ *
  * @module index
  */
 
@@ -31,6 +36,8 @@ import { DEFAULT_COMMAND_NAME, registerMloaderCommand } from './commands/mloader
 import { registerMloaderHttp, WasmDisabledError } from './http.js'
 import { installSeedExamples } from './seed.js'
 import { createConsole } from './console.js'
+import { watchPluginRoots } from './watch.js'
+import type { RootWatchHandle } from './watch.js'
 import type {
   BackendInstance,
   ConsoleChannel,
@@ -72,6 +79,8 @@ interface LoaderConfig {
   seedExamples?: boolean
   /** Terminal output: `false`, `true`, or `'verbose'`. Defaults to true. */
   console?: boolean | 'verbose'
+  /** Mount and unmount plugin directories that appear or disappear while the loader runs. Defaults to true. */
+  watch?: boolean
   /** WebAssembly backend switch. Disabled by default. */
   wasm?: { enabled?: boolean }
 }
@@ -96,8 +105,15 @@ const DEFAULTS = {
   command: true as boolean | string,
   seedExamples: true,
   console: true as boolean | 'verbose',
+  watch: true,
   wasm: { enabled: false },
 }
+
+/** Delay before a plugin that failed right after it appeared is started again. */
+const REFRESH_RETRY_MS = 750
+
+/** How often such a plugin is retried before it stays failed until a reload. */
+const REFRESH_RETRIES = 3
 
 /**
  * Owns every external plugin hosted by the loader.
@@ -129,6 +145,16 @@ export class PluginManager {
   aborted = false
   /** Background boot task, so teardown can wait for it to finish creating instances. */
   bootTask: Promise<void> | undefined
+  /** Open handle on the plugin roots, once watching started. */
+  #watchHandle: RootWatchHandle | undefined
+  /** Rescan in flight; a change that arrives meanwhile is queued instead of racing it. */
+  #refreshTask: Promise<void> | undefined
+  /** True when a root change arrived while a rescan was running. */
+  #refreshQueued = false
+  /** Retry budget used per plugin id whose start failed right after its directory appeared. */
+  #retries = new Map<string, number>()
+  /** Pending retry timers, cleared on teardown. */
+  #retryTimers = new Set<ReturnType<typeof setTimeout>>()
 
   /**
    * @param ctx - Context of the loader plugin.
@@ -161,33 +187,7 @@ export class PluginManager {
 
     for (const spec of specs) {
       if (this.aborted) break
-      const record = this.#createRegistrar(spec)
-      this.records.set(spec.id, record)
-
-      if (!spec.enabled) {
-        record.state = PLUGIN_STATE.DISABLED
-        this.logger?.info?.(`[${spec.id}] disabled by manifest`)
-        this.out.lifecycle(`skipped ${spec.id} (disabled in manifest)`)
-        continue
-      }
-      if (this.config.autoEnable === false) {
-        record.state = PLUGIN_STATE.DISCOVERED
-        continue
-      }
-      // The WebAssembly path is opt-in until its failure injection coverage is complete.
-      if (spec.backend === 'wasm' && this.config.wasm?.enabled !== true) {
-        record.state = PLUGIN_STATE.DISABLED
-        record.error = 'wasm backend disabled (set config.wasm.enabled = true to opt in)'
-        this.logger?.warn?.(`[${spec.id}] skipped: ${record.error}`)
-        this.out.lifecycle(`skipped ${spec.id} (wasm backend is disabled)`)
-        continue
-      }
-
-      try {
-        await this.#startSafely(record)
-      } catch {
-        // #startSafely reported the failure and left the record failed; boot continues.
-      }
+      await this.#admit(spec)
     }
 
     if (this.aborted) {
@@ -200,6 +200,190 @@ export class PluginManager {
     this.out.lifecycle(`ready: ${applied.length} plugin(s) mounted${tail}`)
     if (applied.length === 0 && this.records.size > 0) {
       this.out.warn('no plugins were mounted')
+    }
+  }
+
+  /**
+   * Track one discovered plugin and apply the startup policy to it.
+   *
+   * Boot and the root watcher share this path, so a plugin installed while the
+   * loader runs is admitted by the same rules as one present at boot: a disabled
+   * manifest stays `disabled`, `autoEnable: false` leaves it `discovered`, and the
+   * WebAssembly opt-in is honoured. A failed start is reported and does not throw.
+   *
+   * @param spec - Normalised plugin specification from discovery.
+   * @param retry - True when a failed start should be retried. A directory caught
+   *   mid copy has its manifest before its entry file, so the first start can fail
+   *   on files that arrive a moment later.
+   */
+  async #admit(spec: PluginSpec, retry = false): Promise<void> {
+    const record = this.#createRegistrar(spec)
+    this.records.set(spec.id, record)
+
+    if (!spec.enabled) {
+      record.state = PLUGIN_STATE.DISABLED
+      this.logger?.info?.(`[${spec.id}] disabled by manifest`)
+      this.out.lifecycle(`skipped ${spec.id} (disabled in manifest)`)
+      return
+    }
+    if (this.config.autoEnable === false) {
+      record.state = PLUGIN_STATE.DISCOVERED
+      return
+    }
+    // The WebAssembly path is opt-in until its failure injection coverage is complete.
+    if (spec.backend === 'wasm' && this.config.wasm?.enabled !== true) {
+      record.state = PLUGIN_STATE.DISABLED
+      record.error = 'wasm backend disabled (set config.wasm.enabled = true to opt in)'
+      this.logger?.warn?.(`[${spec.id}] skipped: ${record.error}`)
+      this.out.lifecycle(`skipped ${spec.id} (wasm backend is disabled)`)
+      return
+    }
+
+    try {
+      await this.#startSafely(record)
+      this.#retries.delete(spec.id)
+    } catch {
+      // #startSafely reported the failure and left the record failed; the caller continues.
+      if (retry) this.#scheduleRetry(spec.id)
+    }
+  }
+
+  /**
+   * Retry a plugin whose start failed as it appeared.
+   *
+   * The retry re-reads the manifest, so a file that was missing on the first
+   * attempt is picked up. The budget is small and per id: a plugin that is really
+   * broken stays `failed` instead of being started in a loop.
+   *
+   * @param id - Plugin id that failed.
+   */
+  #scheduleRetry(id: string): void {
+    if (this.config.watch === false || this.disposed || this.aborted) return
+    const used = this.#retries.get(id) ?? 0
+    if (used >= REFRESH_RETRIES) {
+      this.logger?.warn?.(`dsh-mloader: giving up on ${id} after ${used} retries`)
+      return
+    }
+    this.#retries.set(id, used + 1)
+    const timer = setTimeout(() => {
+      this.#retryTimers.delete(timer)
+      void this.#retryStart(id)
+    }, REFRESH_RETRY_MS)
+    timer.unref()
+    this.#retryTimers.add(timer)
+  }
+
+  /** Start one previously failed plugin again, if its directory is still there. */
+  async #retryStart(id: string): Promise<void> {
+    if (this.disposed || this.aborted) return
+    if (this.records.get(id)?.state !== PLUGIN_STATE.FAILED) return
+    const roots = this.config.resolvedRoots ?? []
+    let specs: PluginSpec[]
+    try {
+      specs = (await discover(roots, this.logger)).specs
+    } catch (error) {
+      this.logger?.warn?.(`dsh-mloader: retry rescan failed: ${messageOf(error)}`)
+      return
+    }
+    if (this.disposed || this.aborted) return
+    const spec = specs.find((candidate) => candidate.id === id)
+    if (spec === undefined) return
+    this.logger?.info?.(`dsh-mloader: retrying ${id} after a failed start`)
+    await this.#admit(spec, true)
+  }
+
+  /**
+   * Start following the plugin roots.
+   *
+   * A change below a root, such as a plugin directory being copied in or deleted,
+   * queues one rescan after the change settles. Watching starts after boot was
+   * scheduled and is a no-op once teardown began, so a change during boot is
+   * handled by boot itself.
+   *
+   * @param roots - Resolved roots to watch. Defaults to the manager's resolved roots.
+   */
+  watchRoots(roots = this.config.resolvedRoots ?? []): void {
+    if (this.#watchHandle !== undefined || this.disposed || this.aborted) return
+    this.#watchHandle = watchPluginRoots({
+      roots,
+      logger: this.logger,
+      onChange: () => {
+        void this.refresh()
+      },
+    })
+  }
+
+  /**
+   * Rescan the roots and reconcile the tracked plugins with what is installed.
+   *
+   * A plugin directory that appeared is admitted by the same policy as boot; one
+   * that disappeared is unloaded. A tracked plugin whose files changed is left
+   * alone, because the scope is the set of installed plugins and not their
+   * contents. Rescans are serialised: a second change during a running rescan
+   * queues exactly one follow-up.
+   *
+   * @returns A promise that resolves when this rescan finished.
+   */
+  refresh(): Promise<void> {
+    if (this.disposed || this.aborted) return Promise.resolve()
+    if (this.#refreshTask !== undefined) {
+      this.#refreshQueued = true
+      return this.#refreshTask
+    }
+    const task = this.#runRefresh().finally(() => {
+      this.#refreshTask = undefined
+      if (this.#refreshQueued) {
+        this.#refreshQueued = false
+        void this.refresh()
+      }
+    })
+    this.#refreshTask = task
+    return task
+  }
+
+  /** Run one rescan. */
+  async #runRefresh(): Promise<void> {
+    const roots = this.config.resolvedRoots ?? []
+    if (this.bootTask !== undefined) {
+      try {
+        await this.bootTask
+      } catch {
+        // boot reports its own failures; the rescan only waits for it to finish.
+      }
+    }
+    if (this.disposed || this.aborted) return
+
+    const { specs, errors } = await discover(roots, this.logger)
+    if (this.disposed || this.aborted) return
+    // A root that stays missing would warn on every rescan, so a rescan logs at debug level.
+    for (const error of errors) this.logger?.debug?.(`discovery: ${error.message}`)
+
+    const installed = new Map(specs.map((spec) => [spec.id, spec]))
+    const removed = [...this.records.keys()].filter((id) => !installed.has(id))
+    const added = specs.filter((spec) => !this.records.has(spec.id))
+    if (removed.length === 0 && added.length === 0) {
+      this.logger?.debug?.(`dsh-mloader: rescan found no change in ${roots.length} root(s)`)
+      return
+    }
+
+    this.logger?.info?.(
+      `dsh-mloader: rescan added ${added.length} and removed ${removed.length} plugin(s)`,
+    )
+    this.out.detail(
+      `rescanned ${roots.length} root(s): ${added.length} new, ${removed.length} gone`,
+    )
+
+    for (const id of removed) {
+      if (this.disposed || this.aborted) return
+      try {
+        await this.unload(id)
+      } catch (error) {
+        this.logger?.warn?.(`dsh-mloader: cannot unload ${id}: ${messageOf(error)}`)
+      }
+    }
+    for (const spec of added) {
+      if (this.disposed || this.aborted) return
+      await this.#admit(spec, true)
     }
   }
 
@@ -488,6 +672,11 @@ export class PluginManager {
     if (this.disposed) return
     this.disposed = true
     this.aborted = true
+    this.#watchHandle?.close()
+    this.#watchHandle = undefined
+    for (const timer of this.#retryTimers) clearTimeout(timer)
+    this.#retryTimers.clear()
+    this.#retries.clear()
     this.logger?.info?.('dsh-mloader: unloading all external plugins')
     const count = this.records.size
     if (count > 0) this.out.lifecycle('unloading plugins')
@@ -498,6 +687,13 @@ export class PluginManager {
         await this.bootTask
       } catch {
         // boot() handles its own failures. Teardown only waits for it to finish.
+      }
+    }
+    if (this.#refreshTask !== undefined) {
+      try {
+        await this.#refreshTask
+      } catch {
+        // A rescan reports its own failures. Teardown only waits for it to finish.
       }
     }
 
@@ -536,6 +732,9 @@ export class PluginManager {
  * an in-flight startup as soon as the fiber leaves the active state, the other
  * runs the full teardown. This ordering is what keeps unloading fast when a
  * hosted plugin is stuck in its own startup.
+ *
+ * Watching the roots starts after boot was scheduled. Teardown closes the
+ * watchers together with the plugins, so no rescan survives the loader.
  *
  * @param ctx - Cordis context of the loader plugin.
  * @param config - Plugin config; omitted keys come from the defaults.
@@ -607,6 +806,8 @@ export async function apply(ctx: LoaderContext, config: LoaderConfig = {}): Prom
     logger?.error?.(`dsh-mloader: boot failed: ${messageOf(error)}`)
   })
   manager.bootTask = bootTask
+
+  if (settings.watch !== false) manager.watchRoots()
 
   if (settings.statusTool !== false) {
     const disposeStatusTool = ctx.tools.register(createStatusTool(() => manager.list()))

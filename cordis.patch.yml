@@ -37,6 +37,10 @@
         # does not print to the terminal, so without this channel a plugin would
         # load or fail invisibly on the command line.
         console: true
+        # Mount a plugin directory that is installed while dsh runs, and unmount
+        # one that is deleted. Only the set of directories is followed: after
+        # editing the files of an installed plugin, run /mloader reload.
+        watch: true
         # The WebAssembly backend is disabled by default. No bundled WebAssembly
         # example is shipped. Run test/wasm-safety.mjs (the binary must be built
         # first) before enabling it.
