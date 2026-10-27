@@ -34,7 +34,7 @@ The consequence of axiom 2 is explicit: an external plugin has no per-plugin `ct
 
 ## 1. Structure
 
-```
+```plaintext
 dsh main process (Node, Cordis)
 |
 +-- Cordis container (unchanged)
@@ -80,7 +80,7 @@ The manifest is the authoritative source of plugin identity and backend selectio
 ```
 
 | Field | Required | Type | Default | Meaning |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `id` | yes | string | none | Plugin identifier, `^[a-z0-9][a-z0-9_-]{0,31}$`. Also the namespace used by logs. |
 | `name` | no | string | `id` | Human readable name. |
 | `version` | no | string | `"0.0.0"` | Informational version string. |
@@ -113,7 +113,7 @@ The Python runtime is shipped in the loader repository under `src/runtime/python
 
 The loader starts a Python plugin as:
 
-```
+```sh
 <pythonBin> -u <loader>/src/runtime/python_sdk/launch.py <plugin entry>
 ```
 
@@ -122,7 +122,7 @@ with the plugin base directory as working directory. `launch.py` loads the packa
 Public names exported by `dsh_mloader_sdk`:
 
 | Name | Kind | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `plugin` | decorator | Marks the entry function `apply(ctx)`. |
 | `tool` | decorator | Declares a tool without an `apply` function. |
 | `ctx` | proxy | The capability context, usable from plugin import time onward. |
@@ -200,7 +200,7 @@ Both styles may be mixed in one plugin. Declared tools are registered first, the
 ### 2.7 Runtime errors
 
 | Situation | Behavior |
-|---|---|
+| --- | --- |
 | A tool handler raises | The `tool.call` reply is `ok:false` with the exception message. The plugin process stays alive. |
 | An unknown tool is called | The reply is `ok:false` with an error message naming the tool. |
 | A registration is rejected | The call site inside `apply` raises `PluginCallError`. The apply handshake then fails. |
@@ -217,7 +217,7 @@ The host validates a tool result against the declared `output` schema, and the d
 Inference applies only to `ctx.tools.register` and `@tool` calls that omit `output`, and only when the handler carries a return annotation. It covers these shapes:
 
 | Annotation | Inferred schema |
-|---|---|
+| --- | --- |
 | `str` | `{"type": "string"}` |
 | `int` | `{"type": "integer"}` |
 | `float` | `{"type": "number"}` |
@@ -240,7 +240,7 @@ An explicit `output` argument always wins. A plugin that needs a schema the tabl
 ### 3.1 The four operations
 
 | # | Host API | RPC operation | Semantics |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | `ctx.tools.register(definition)` | `tools.register` | Registers a tool on the loader's context. |
 | 2 | `ctx.on(event, listener)` | `events.on` | Subscribes to one whitelisted event. |
 | 3 | `ctx.logger.{debug,info,warn,error}(message, data?)` | `logger.log` | One-way log notification. No reply is awaited. |
@@ -255,7 +255,7 @@ Slash commands are deliberately not available to external plugins. A command is 
 `tools.register` accepts a `tool` object:
 
 | Field | Required | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | `name` | yes | Must match `^[A-Za-z0-9_-]{1,64}$`. |
 | `description` | yes | Non-empty human readable description. |
 | `parameters` | no | Input schema in the subset of §3.5. Defaults to an empty object schema. |
@@ -274,7 +274,7 @@ The loader registers the prepared definition on its own context:
 The only subscribable events are:
 
 | Event | Fired when |
-|---|---|
+| --- | --- |
 | `tools/execute` | A tool is dispatched. |
 | `tools/pre-execute` | A tool is about to execute. |
 | `tools/post-execute` | A tool has executed. |
@@ -378,7 +378,7 @@ A notification frame is processed and never answered. Every request frame receiv
 Host payloads:
 
 | Operation | Payload | Reply result |
-|---|---|---|
+| --- | --- | --- |
 | `boot` | `pluginId`, `manifest` with `id`, `name`, `version`, `inject` | Python: `pluginId`, `python` version. |
 | `apply` | `inject` | `tools`: sorted registered tool names, `events`: sorted subscribed event names. |
 | `tool.call` | `tool`, `args` | The JSON value returned by the handler. |
@@ -388,7 +388,7 @@ Host payloads:
 Plugin payloads:
 
 | Operation | Payload |
-|---|---|
+| --- | --- |
 | `tools.register` | `tool` object as defined in §3.2. |
 | `events.on` | `event` name from the whitelist. |
 | `logger.log` | `level` (`debug`, `info`, `warn` or `error`), `message`, optional `data`. |
@@ -398,23 +398,27 @@ An operation outside these lists is rejected with `ok:false` and an error messag
 
 ### 4.3 Handshake and call sequence
 
-```
-host                                    plugin
- |  spawn                                  |
- |---- boot ------------------------------>|  load the entry module
- |<----------------------------- ready ----|
- |---- apply ----------------------------->|  register declared tools, run apply(ctx)
- |<-------------- tools.register (req) ----|
- |---- ack (ok:true) --------------------->|
- |<-------------- events.on (req) ---------|
- |---- ack (ok:true) --------------------->|
- |<------------------------ apply result --|
- |                                         |
- |---- tool.call ------------------------->|
- |<------------------------------ result --|
- |---- event ----------------------------->|
- |<------------------------------ result --|
- |---- dispose --------------------------->|  run cleanups, exit
+```mermaid
+sequenceDiagram
+    participant H as host
+    participant P as plugin
+    Note over H,P: spawn the child process
+    H->>P: boot
+    Note right of P: load the entry module
+    P->>H: ready (pluginId, python)
+    H->>P: apply (inject)
+    Note right of P: register declared tools,\nthen run apply(ctx)
+    P->>H: tools.register (request)
+    H->>P: ack (ok:true)
+    P->>H: events.on (request)
+    H->>P: ack (ok:true)
+    P->>H: apply result (tools, events)
+    H->>P: tool.call (tool, args)
+    P->>H: result
+    H->>P: event (event, args)
+    P->>H: result
+    H->>P: dispose (reason)
+    Note right of P: run cleanups, exit
 ```
 
 Registration is host executed: the plugin requests it, and the host performs the real registration and records the disposer in the plugin's ledger.
@@ -424,7 +428,7 @@ The runtime does not validate the manifest. Manifest validation happens during d
 ### 4.4 Timeouts and failures
 
 | Situation | Behavior |
-|---|---|
+| --- | --- |
 | `boot` or `apply` exceeds `startupMs` (default 10000 ms) | The loader kills the process and marks the plugin `failed`. Other plugins are unaffected. |
 | `tool.call` or event delivery exceeds `callMs` (default 30000 ms) | The call returns an error and the process stays alive. A tool timeout does not kill the plugin. |
 | The process crashes, including `os._exit()` | The plugin's registrations are revoked and its state becomes `failed`. dsh and the other plugins continue. |
@@ -437,7 +441,7 @@ The two deadlines come from the manifest: `timeouts.startupMs` covers `boot` and
 
 ## 5. Lifecycle and ownership
 
-```
+```plaintext
 discovered -> loaded -> applied -> disposed
                    |
                    +-> failed
@@ -445,7 +449,7 @@ discovered -> loaded -> applied -> disposed
 ```
 
 | State | Meaning |
-|---|---|
+| --- | --- |
 | `discovered` | The manifest is accepted. The plugin is not started, for example because `autoEnable` is `false`. |
 | `loaded` | The backend instance is created and the boot handshake is in progress. |
 | `applied` | The handshake completed and the plugin's registrations are active. |
@@ -498,7 +502,7 @@ interface RegistrarHandle {
 Both backends satisfy the same contract. Their physical differences are:
 
 | Aspect | Python backend | WebAssembly backend |
-|---|---|---|
+| --- | --- | --- |
 | Boundary | Operating system process | Worker thread in the host process |
 | Transport | NDJSON over `stdin` and `stdout` | `postMessage` and shared linear memory |
 | Registration channel | Plugin sends requests during `apply` through `setInboundHandler` | Plugin returns declarations as the `apply` result |
@@ -514,7 +518,7 @@ The core ABI depends on the WebAssembly core specification only. It does not req
 ### 7.1 Required exports
 
 | Export | Signature | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `memory` | memory | Linear memory used for request and result buffers. |
 | `dsh_alloc` | `(len: i32) -> i32` | Allocate a buffer and return its pointer. |
 | `dsh_free` | `(ptr: i32, len: i32) -> void` | Free a buffer. |
@@ -544,7 +548,7 @@ WASI is not part of the supported contract.
 ## 8. Security model
 
 | Dimension | Python child process | WebAssembly worker thread |
-|---|---|---|
+| --- | --- | --- |
 | Isolation boundary | Operating system process | Thread in the same address space |
 | File system | Full access by default | No access (no WASI preopens) |
 | Network | Allowed by default | No access |
@@ -563,7 +567,7 @@ A crashing or hanging plugin must not take dsh down. The loader revokes that plu
 
 External plugins are installed under the profile, not inside the loader package:
 
-```
+```plaintext
 ~/.dsh/profiles/<profile>/
   cordis.patch.yml
   package.json
@@ -586,7 +590,7 @@ The profile's `node_modules` is not a supported install location. It is owned by
 `roots` accepts three forms:
 
 | Form | Resolution |
-|---|---|
+| --- | --- |
 | `~/.dsh/...` | The leading `~` is expanded to the home directory. |
 | `./x` or `x` | Resolved against the profile directory, or against the current working directory when no profile is detected. |
 | `/abs/path` | Used as is. |

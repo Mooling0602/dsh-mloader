@@ -1,5 +1,13 @@
 # AGENTS.md
 
+<!--
+此标记仅由人类维护者所使用，并添加以仓库所有者所使用的自然语言编写的注解内容。
+注意：这条注解不要求修改任何内容，也不允许被项目维护者以外的人修改！
+当 AI Agents 看见这些注解时，应该根据其意见进行修改，然后移除掉注解。
+不允许 AI Agents 添加或者修改任何注解内容，在删除注解前，应确保已正确按照注解内意见修改了受影响的内容，并明确告知用户。
+不允许未持有 Collaborators 权限的人员添加或修改任何注解内容，包含这类更改且未开启 `Allow edits from maintainers`（允许维护者修改）的外部 PR 将被拒绝。
+-->
+
 **Where the current state of this repository violates the rules below, leave it alone.** Do not tidy it, reformat it, translate it or migrate it on your own initiative, and do not treat an existing violation you happen to pass as part of the task. Cleanup of pre-existing material happens only when the user asks for it, and that request is the only trigger.
 
 Rules for AI coding agents working in this repository. Follow them exactly. When a rule and your own judgement disagree, the rule wins. The rules govern the code and the prose you write or change; material you are not touching stays as it is until the user asks for it to be brought into line.

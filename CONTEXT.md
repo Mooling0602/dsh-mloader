@@ -41,7 +41,7 @@ The cost of axiom 2 is deliberate: an external plugin has no per-plugin `ctx` is
 
 ### Loader source
 
-```
+```plaintext
 src/
   index.ts                 Cordis plugin entry and PluginManager
   contract.ts              constants: event whitelist, JSON Schema subset validator,
@@ -114,7 +114,7 @@ The repository `dsh-mloader-python-sdk` (distribution name `dsh-mloader-sdk`, im
 
 The SDK repository owns everything that is packaging rather than runtime code:
 
-```
+```plaintext
 dsh-mloader-python-sdk/
   pyproject.toml           setuptools metadata, package dir src/dsh-mloader-sdk
   uv.lock                  uv lockfile
@@ -132,7 +132,7 @@ The wheel built by the SDK repository includes `py.typed` and the MIT `LICENSE` 
 
 ### Profile side
 
-```
+```plaintext
 ~/.dsh/profiles/<profile>/
   cordis.patch.yml         loader overrides, only when defaults are changed
   package.json             dsh.profile.bundles lists dsh-mloader
@@ -196,7 +196,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 ### Test matrix
 
 | Suite | Assertions | Covers | Needs `.wasm` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `integration.mjs` | 23 | Python end to end on a real Cordis context and a real tool runtime | no |
 | `edge-cases.mjs` | 17 | schema pre-validation, event whitelist, crash isolation, unload cleanup | no |
 | `dual-backend.mjs` | 19 | Python and WebAssembly plugins in one loader | yes, otherwise skips |
@@ -248,7 +248,7 @@ The `diff` must report no difference. Both trees must be identical when a releas
 The defaults are defined in `src/index.ts` and repeated in `cordis.patch.yml`. A profile overrides a value with the same plugin id in its own `cordis.patch.yml`. The configuration belongs to the operator; third-party plugin authors do not set it.
 
 | Key | Default | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | `roots` | `[]` | Extra plugin root directories. Leave empty; the profile plugin directory is discovered automatically. |
 | `profilePlugins` | `true` | Append `<profile>/mloader/plugins` to the roots. Set to `false` to use only explicit roots. |
 | `profileDir` | `undefined` | Override the detected profile directory. Intended for tests, never for production. |
@@ -269,23 +269,33 @@ The defaults are defined in `src/index.ts` and repeated in `cordis.patch.yml`. A
 The Python backend starts one child process per plugin. CPython caches the compiled entry file beside it in `__pycache__` and decides whether a cache entry still matches the source by the source mtime in whole seconds plus the source size. Neither input changes when an edit keeps the file the same length and lands inside the same second, which is easy to hit when two equal length literals are swapped or a value is retyped in place. A reload then starts a child that loads the previous code and reports success, so the failure is silent.
 
 `enablePyc` therefore defaults to `false`, and the backend spawns the child with `PYTHONDONTWRITEBYTECODE=1`. No cache directory is written, so nothing can go stale and a reload always runs the code on disk. An operator who prefers a faster start sets `enablePyc: true`, which restores the cache and with it the chance that a reload runs a stale entry. The switch governs writing only: a cache directory left behind by an earlier run is still read, so clearing `__pycache__` is a manual step when the switch is turned back on.
+
 ### Restart handoff checklist
 
 A code change to the loader needs a dsh restart before it takes effect. Ask the operator to restart, and check the following after the restart.
 
 1. **Loader mounted.** The `dsh web` terminal shows `[mloader]` lifecycle lines. With the bundled example on a fresh profile:
-   ```
+
+   ```sh
    [mloader] seeded: hello-mloader
    [mloader] mounted hello-mloader (python, tools: hello_add, hello_mloader)
    [mloader] ready: 1 plugin(s) mounted
    ```
+
    No `[mloader]` line means `console` is off, or no plugin root was found. The loader warns in the latter case with `profile directory not detected; <profile>/mloader/plugins was skipped` or `no plugin roots configured`.
+
 2. **Operator surfaces agree.** `/mloader` lists the same plugins as the `mloader_status` tool, each with backend, state, tools and events. The dsh-mloader bundle detail page on the dsh Plugins page shows the External plugins section, and a switch changes the plugin state immediately.
+
 3. **External plugins stay invisible.** The plugin tools exist, but the hosted plugins do not appear in the dsh plugin management list and have no Cordis fiber.
+
 4. **Deadlock regression.** The bundled example subscribes to `tools/execute` and logs from the handler. Call any tool several times: every call returns promptly. A hang here means the event dispatch or one-way logging rule was broken.
+
 5. **One process per Python plugin.** `ps -ef | grep launch.py` shows one process per applied Python plugin, owned by the dsh process.
+
 6. **Hot refresh.** Copy a plugin directory into `<profile>/mloader/plugins` while dsh runs. The terminal prints `[mloader] rescan added 1 and removed 0 plugin(s)` and the mount line for the new plugin, and its tools appear without a restart. Delete the directory again: the terminal prints `[mloader] unloaded <id>` and the tools are revoked. With `watch: false` neither line appears.
+
 7. **Crash isolation.** Kill one plugin process. Its tools fail with a tool error, the other plugins keep working, dsh stays up, and the killed plugin reports `failed` in the status output.
+
 8. **Rollback.** Set `disabled: true` under the `dsh-mloader` id in the profile's `cordis.patch.yml` and restart, or run `dsh plugin --profile web remove dsh-mloader`. Plugins under `<profile>/mloader/plugins` stay on disk either way.
 
 ## 5. Pitfalls the code already paid for
@@ -401,7 +411,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **The command service is optional.** The loader does not inject `commands`; it probes `ctx.get('commands')` at runtime and skips command registration with a debug log when the service is missing. A missing command must never prevent plugin mounting.
 - **The command is one command group named `/mloader`.** The default command name matches `^[a-z][a-z0-9_-]*$`. An invalid configured name is a warning and the command is not registered. A user input error in the handler becomes a `{ kind: 'error' }` command result instead of a thrown exception.
 - **The command forms are fixed.** `/mloader` and `/mloader status` list every known plugin through the shared formatter. `/mloader <id>` renders a detail block with `Plugin <id>:`, `Name:`, `Version:`, `Backend:`, `State: <state> (loaded|not loaded)`, `Tools:` (or `none`), `Events:` (or `none`), `Registrations:` and, when present, an `Error:` line. `/mloader load <id>`, `/mloader unload <id>` and `/mloader reload <id>` request the lifecycle transition; loading an already loaded plugin and unloading a plugin that is not loaded succeed with a short message and do not call the manager. Unknown ids return `Unknown plugin "<id>".`; `help`, malformed input and a missing id return the usage text. The reserved words `status`, `help`, `load`, `unload` and `reload` win over a plugin id of the same name.
-- **The list output format is fixed by the formatter.** No plugins renders `No external plugins are managed by dsh-mloader.` A list starts with `<n> external plugin(s):` followed by a blank line, and each plugin line is `- <id> (<backend>, <state>)` with optional ` tools=[a, b]` and ` events=[x, y]` suffixes. A plugin error appears on its own line as `  error: <message>`.
+- **The list output format is fixed by the formatter.** No plugins renders `No external plugins are managed by dsh-mloader.` A list starts with `<n> external plugin(s):` followed by a blank line, then one line per plugin in the form `- <id> (<backend>, <state>)`. Each group with entries is appended after one space, tools first as `tools=[a, b]` and then events as `events=[x, y]`, so a plugin with neither ends at the closing parenthesis and a plugin with only events appends one group. A plugin error appears on the line below, indented by two spaces, as `error: <message>`.
 - **`ctx.provide('mloader', ...)` exposes `list`, `enable`, `disable`, `setEnabled`, `reload` and `unload`** for the operator surfaces and for tests. dsh itself does not need it, and it is not part of the external plugin contract. The structural context type does not promise `provide`, so the call is guarded.
 
 ### 5.10 Operator surfaces and the browser half
@@ -439,7 +449,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 See section 4 of `AGENTS.md` for the rule that governs where documentation goes. In short:
 
 | File | Audience | Character |
-|---|---|---|
+| --- | --- | --- |
 | `README.md`, `README.zh.md` | users of the plugin | short, plain, task-oriented |
 | `docs/` | third-party plugin authors | precise, normative, ABI-grade |
 | `AGENTS.md` | AI coding agents and maintainers | rules only |
