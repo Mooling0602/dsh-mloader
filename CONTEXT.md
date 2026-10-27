@@ -66,13 +66,15 @@ src/
   commands/mloader.ts      /mloader command group, called by the user
 scripts/build-client.mjs   deterministic build of the committed client bundle
 client.js                  committed generated browser bundle
+locale/en.json             title and description the Plugins page renders
+locale/zh.json             Simplified Chinese copy of the same two fields
 tsconfig.client.json       compiler configuration for src/client
 seed/hello-mloader/        bundled example plugin: manifest and plugin.py
-test/                      16 self-contained suites and their fixtures
+test/                      19 self-contained suites and their fixtures
 docs/ABI.md                normative plugin contract
 ```
 
-Top level files: `AGENTS.md` (rules), `CONTEXT.md` (this file), `README.md` and `README.zh.md` (users), `NOTICE` (copyright and license mapping), `LICENSE`, `COPYING` and `COPYING.LESSER` (license texts), `package.json` (package metadata and scripts), `pnpm-lock.yaml`, `tsconfig.json` (host compiler configuration), `tsconfig.client.json` (browser half compiler configuration), `client.js` (generated browser bundle), `cordis.patch.yml` (default loader configuration), `scripts/` (maintainer build scripts), `.markdownlint.json` (Markdown lint policy) and `.gitignore`. The `.build/` intermediate directory is ignored.
+Top level files: `AGENTS.md` (rules), `CONTEXT.md` (this file), `README.md` and `README.zh.md` (users), `NOTICE` (copyright and license mapping), `LICENSE`, `COPYING` and `COPYING.LESSER` (license texts), `package.json` (package metadata and scripts), `pnpm-lock.yaml`, `tsconfig.json` (host compiler configuration), `tsconfig.client.json` (browser half compiler configuration), `client.js` (generated browser bundle), `locale/` (the title and description the Plugins page renders, per language), `cordis.patch.yml` (default loader configuration), `scripts/` (maintainer build scripts), `.markdownlint.json` (Markdown lint policy) and `.gitignore`. The `.build/` intermediate directory is ignored.
 
 The test tree holds the suites directly under `test/`, the Python and WebAssembly test plugins under `test/plugins/`, fault injection plugins under `test/fixtures/`, the reentrancy fixture under `test/deadlock/reentrant/` and the event projection fixture under `test/exec-payload/exec-observer/`.
 
@@ -99,6 +101,7 @@ The Python SDK is a flat package. Its content is the directory `src/runtime/pyth
 - `client.js` at the repository root is a committed generated artifact. Its header says the file is generated. Never edit it by hand; change `src/client/core.ts` and run `pnpm build`.
 - The build is deterministic: the same source produces the same bytes, so `client.js` changes only when its source or the build script changes. The `.build/` intermediate output is ignored by git.
 - `package.json` declares the bundle through `exports["./client"]` and `dsh.client` (`platform: "web"` plus the `ui-plugin-manager`, `ui-slots` and `locale` client services to inject), and `files` includes `client.js`. Only the web client module system loads the bundle; the host plugin works without it.
+- The Plugins page shows the package title and description from `locale/en.json` and `locale/zh.json`, not from `package.json`'s `description`. The host reads `<name>/locale/en.json` through the package exports as the discovery entry, then resolves every other `.json` in that directory through the same exports. A package without the locale resources therefore renders no description at all, and one without the `./package.json` export loses the manifest fallback for a field no dictionary supplies. Both files carry a `meta.title` and a `meta.description`, and the host rejects the whole read when either is present but not a non-empty string. `files` ships `locale/*.json`, so a packed install carries what the exports point at.
 
 ### Python runtime package
 
@@ -215,8 +218,9 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `output-inference.mjs` | 20 | result schema derived from a return annotation on both registration styles, the mapping table, explicit `output` precedence, and the host default for an absent, `Any` or unresolvable annotation | no |
 | `encoding.mjs` | 4 | UTF-8 standard streams survive a manifest that sets `PYTHONIOENCODING` to ASCII, for a non-ASCII value and for a stray non-ASCII diagnostic | no |
 | `bytecode.mjs` | 4 | no `__pycache__` under the default, and one under `enablePyc: true` | no |
+| `package-meta.mjs` | 16 | the locale files, their `meta.title` and `meta.description`, the exports that expose them and the `files` entry that ships them | no |
 
-The baseline is 446 assertions across 18 suites, 32 of them requiring a compiled `.wasm` fixture. A run without the two binaries reports 414 assertions passed and skips the two WebAssembly suites. Skipping is an environment gap, not a pass: those suites verify that a looping WebAssembly plugin cannot block the host, which is a safety property.
+The baseline is 460 assertions across 19 suites, 32 of them requiring a compiled `.wasm` fixture. A run without the two binaries reports 428 assertions passed and skips the two WebAssembly suites. Skipping is an environment gap, not a pass: those suites verify that a looping WebAssembly plugin cannot block the host, which is a safety property.
 
 ### WebAssembly fixtures
 

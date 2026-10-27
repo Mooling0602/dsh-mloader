@@ -24,10 +24,13 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./client": "./client.js"
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "client.js",
+    "locale/*.json",
     "src",
     "!src/**/__pycache__",
     "!src/**/*.pyc",

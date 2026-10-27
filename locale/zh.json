@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "多运行时插件加载器 (dsh-mloader)",
+    "description": "把 Python 和 WebAssembly 插件作为同一个 Cordis 插件的能力托管，并注册它们提供的工具和命令。"
+  }
+}
