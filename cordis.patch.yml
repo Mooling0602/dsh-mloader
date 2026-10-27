@@ -23,6 +23,13 @@
         roots: []
         autoEnable: true
         pythonBin: python3
+        # Keep the bytecode cache the Python interpreter writes beside a plugin
+        # entry. It is off by default because the interpreter invalidates a cache
+        # entry by the source mtime in whole seconds plus the source size, so an
+        # edit that keeps both unchanged makes /mloader reload start the old code
+        # again. Turn it on to make plugin start faster, and accept that a reload
+        # may then report success while it still runs the previous code.
+        enablePyc: false
         statusTool: true
         # Register the /mloader command group (typed by the user).
         # true = default name, a string = custom name, false = disabled.

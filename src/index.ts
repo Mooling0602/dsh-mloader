@@ -71,6 +71,8 @@ interface LoaderConfig {
   autoEnable?: boolean
   /** Python executable used for Python plugins. Defaults to `python3`. */
   pythonBin?: string
+  /** Keep the `__pycache__` directory a Python plugin writes when it loads. Defaults to false. */
+  enablePyc?: boolean
   /** Register the `mloader_status` tool. Defaults to true. */
   statusTool?: boolean
   /** Register the `/mloader` command, optionally with a custom name. Defaults to true. */
@@ -101,6 +103,7 @@ const DEFAULTS = {
   profileDir: undefined as string | undefined,
   autoEnable: true,
   pythonBin: 'python3',
+  enablePyc: false,
   statusTool: true,
   command: true as boolean | string,
   seedExamples: true,
@@ -430,6 +433,7 @@ export class PluginManager {
       ? new PythonBackendInstance(spec, {
         logger: this.logger,
         pythonBin: this.config.pythonBin,
+        enablePyc: this.config.enablePyc,
         onCrash: (pluginId, info) => this.#onPythonCrash(record, pluginId, info),
       })
       : new WasmBackendInstance(spec, { logger: this.logger })

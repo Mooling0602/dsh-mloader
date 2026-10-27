@@ -98,6 +98,8 @@ export interface PythonBackendOptions {
   pythonBin?: string
   /** Called once when the child exits without being stopped by the loader. */
   onCrash?: CrashHandler
+  /** Keep the `__pycache__` directory the child writes. Defaults to false. */
+  enablePyc?: boolean
 }
 
 /**
@@ -145,6 +147,7 @@ export class PythonBackendInstance implements BackendInstance {
   private readonly logger: LoaderLogger | undefined
   private readonly pythonBin: string
   private readonly onCrash: CrashHandler | undefined
+  private readonly enablePyc: boolean
 
   private child: ChildProcess | null = null
   private nextId = 1
@@ -165,11 +168,12 @@ export class PythonBackendInstance implements BackendInstance {
    * @param options - Logger, interpreter and crash callback.
    */
   constructor(spec: PluginSpec, options: PythonBackendOptions = {}) {
-    const { logger, pythonBin = 'python3', onCrash } = options
+    const { logger, pythonBin = 'python3', onCrash, enablePyc = false } = options
     this.spec = spec
     this.logger = logger
     this.pythonBin = pythonBin
     this.onCrash = onCrash
+    this.enablePyc = enablePyc
     this.capabilities = { tools: true, events: true, logger: true, effect: true }
   }
 
@@ -195,6 +199,12 @@ export class PythonBackendInstance implements BackendInstance {
       env[key] = value
     }
     Object.assign(env, spec.env, { PYTHONUNBUFFERED: '1' })
+    // The interpreter caches compiled bytecode beside the entry file and
+    // invalidates a cache entry by the source mtime in whole seconds plus the
+    // source size. An edit that keeps both unchanged therefore reloads the old
+    // code, which makes a reload look successful while it is not. The default
+    // writes no cache at all; an operator who wants faster loads enables it.
+    if (!this.enablePyc) env.PYTHONDONTWRITEBYTECODE = '1'
 
     const child = spawn(pythonBin, ['-u', LAUNCH_SCRIPT, spec.entry], {
       cwd: spec.baseDir,

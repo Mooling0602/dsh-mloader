@@ -52,6 +52,7 @@ const DEFAULTS = {
     profileDir: undefined,
     autoEnable: true,
     pythonBin: 'python3',
+    enablePyc: false,
     statusTool: true,
     command: true,
     seedExamples: true,
@@ -366,6 +367,7 @@ export class PluginManager {
             ? new PythonBackendInstance(spec, {
                 logger: this.logger,
                 pythonBin: this.config.pythonBin,
+                enablePyc: this.config.enablePyc,
                 onCrash: (pluginId, info) => this.#onPythonCrash(record, pluginId, info),
             })
             : new WasmBackendInstance(spec, { logger: this.logger });

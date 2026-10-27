@@ -68,6 +68,7 @@ export class PythonBackendInstance {
     logger;
     pythonBin;
     onCrash;
+    enablePyc;
     child = null;
     nextId = 1;
     pending = new Map();
@@ -86,11 +87,12 @@ export class PythonBackendInstance {
      * @param options - Logger, interpreter and crash callback.
      */
     constructor(spec, options = {}) {
-        const { logger, pythonBin = 'python3', onCrash } = options;
+        const { logger, pythonBin = 'python3', onCrash, enablePyc = false } = options;
         this.spec = spec;
         this.logger = logger;
         this.pythonBin = pythonBin;
         this.onCrash = onCrash;
+        this.enablePyc = enablePyc;
         this.capabilities = { tools: true, events: true, logger: true, effect: true };
     }
     /**
@@ -117,6 +119,13 @@ export class PythonBackendInstance {
             env[key] = value;
         }
         Object.assign(env, spec.env, { PYTHONUNBUFFERED: '1' });
+        // The interpreter caches compiled bytecode beside the entry file and
+        // invalidates a cache entry by the source mtime in whole seconds plus the
+        // source size. An edit that keeps both unchanged therefore reloads the old
+        // code, which makes a reload look successful while it is not. The default
+        // writes no cache at all; an operator who wants faster loads enables it.
+        if (!this.enablePyc)
+            env.PYTHONDONTWRITEBYTECODE = '1';
         const child = spawn(pythonBin, ['-u', LAUNCH_SCRIPT, spec.entry], {
             cwd: spec.baseDir,
             env,
