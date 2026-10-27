@@ -6,9 +6,10 @@
  *   1. client.js starts with the generated header and registers one bundle.
  *   2. The factory requires React and the client primitives, and returns the
  *      slots and locale injection plus apply.
- *   3. apply installs the zh and en dictionaries, the placement stylesheet and
- *      the section.
- *   4. The component renders nothing for every other detail page subject.
+ *   3. apply installs the zh and en dictionaries and the bundle configuration
+ *      entry.
+ *   4. The section renders for an empty owner props object, because the key of
+ *      the registration confines it to the dsh-mloader bundle page.
  *   5. The section renders loading, error, empty and populated states in the
  *      same row form the page uses for a bundle's components.
  *   6. A switch posts the requested runtime state and replaces its row from the
@@ -150,7 +151,7 @@ async function main() {
     assert.equal(typeof pluginEntry.apply, 'function')
   })
 
-  section('2. apply installs the dictionaries, the placement rule and the section')
+  section('2. apply installs the dictionaries and the bundle configuration entry')
   const capture = { injections: [], locales: [], registration: null }
   const ctx = {
     slots: {
@@ -165,13 +166,13 @@ async function main() {
   }
   pluginEntry.apply(ctx)
 
-  await check('apply injects the plugins.detail.section slot once', () => {
-    assert.deepEqual(capture.injections, ['plugins.detail.section'])
+  await check('apply injects the plugins.bundle.config slot once', () => {
+    assert.deepEqual(capture.injections, ['plugins.bundle.config'])
   })
   await check('the registration carries the expected identity', () => {
     assert.notEqual(capture.registration, null)
-    assert.equal(capture.registration.options.name, 'plugins.detail.section')
-    assert.equal(capture.registration.options.id, 'mloader-external-plugins')
+    assert.equal(capture.registration.options.name, 'plugins.bundle.config')
+    assert.equal(capture.registration.options.key, 'dsh-mloader')
     assert.equal(capture.registration.options.order, 10)
     assert.equal(capture.registration.options.locale, 'mloader')
   })
@@ -195,63 +196,26 @@ async function main() {
     }
     assert.ok(values.some((value) => value.includes('{name}')), 'switch aria-label')
   })
-  await check('apply installs the placement stylesheet and removes it with its effect', () => {
-    const appended = []
-    const removed = []
-    const cleanups = []
-    const previousDocument = globalThis.document
-    globalThis.document = {
-      getElementById() { return null },
-      createElement(tag) { return { tag, id: '', textContent: '', remove() { removed.push(true) } } },
-      head: { append(node) { appended.push(node) } },
-    }
-    try {
-      pluginEntry.apply({
-        slots: {
-          inject(name, callback) { return callback() },
-          register() { return () => {} },
-        },
-        locale: {
-          register() { return () => {} },
-          bind() { return (key) => key },
-        },
-        effect(setup) { const cleanup = setup(); cleanups.push(cleanup); return cleanup },
-      })
-    } finally {
-      globalThis.document = previousDocument
-    }
-    assert.equal(appended.length, 1)
-    assert.equal(appended[0].tag, 'style')
-    assert.equal(appended[0].id, 'dsh-mloader-client-style')
-    assert.ok(appended[0].textContent.includes('[data-plugin-detail="dsh-mloader"]'))
-    for (const cleanup of cleanups) if (typeof cleanup === 'function') cleanup()
-    assert.equal(removed.length, 1)
-  })
   await check('apply returns early without the client services', () => {
     pluginEntry.apply({})
     pluginEntry.apply({ slots: ctx.slots })
     pluginEntry.apply({ locale: ctx.locale })
   })
 
-  section('3. The section renders only for the dsh-mloader bundle')
+  section('3. The section renders for its own key')
   const Component = capture.registration.Component
-  const match = { kind: 'bundle', pkg: { name: 'dsh-mloader' } }
-  await check('another bundle renders nothing', () => {
-    assert.equal(Component({ subject: { kind: 'bundle', pkg: { name: 'other-bundle' } } }), null)
+  await check('the component renders for the empty owner props of a page view', () => {
+    const tree = Component({ view: 'page' })
+    assert.notEqual(tree, null)
+    assert.equal(typeof tree.tag, 'function')
   })
-  await check('a row, an official item or a missing subject renders nothing', () => {
-    assert.equal(Component({ subject: { kind: 'row', pkg: { name: 'dsh-mloader' } } }), null)
-    assert.equal(Component({ subject: { kind: 'item', id: 'dsh-mloader' } }), null)
-    assert.equal(Component({}), null)
-  })
-  await check('the dsh-mloader bundle renders the section head and the loading state', () => {
-    const tree = Component({ subject: match })
+  await check('the section head and the loading state render', () => {
+    const tree = Component({ view: 'page' })
     assert.notEqual(tree, null)
     assert.equal(typeof tree.tag, 'function')
     const body = tree.tag(tree.props)
     assert.notEqual(body, null)
     assert.equal(body.props['data-mloader'], 'external-plugins')
-    assert.equal(body.props.style.order, 1, 'the section claims its place under the component rows')
     const texts = textsOf(body)
     assert.ok(texts.includes('title'))
     assert.ok(texts.includes('loading'))
@@ -273,7 +237,7 @@ async function main() {
       return [typeof initial === 'function' ? initial() : initial, setter]
     }
     try {
-      const wrapper = Component({ subject: match })
+      const wrapper = Component({ view: 'page' })
       const body = expandComponents(wrapper.tag(wrapper.props))
       return { body, elements: elementsOf(body), updates }
     } finally {

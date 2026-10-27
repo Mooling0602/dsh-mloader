@@ -5,9 +5,10 @@
  * Plugins page draws for the dsh-mloader bundle. The section lists every
  * external plugin the loader hosts in the same row form the page uses for the
  * components a bundle contributes, and switches each one on or off at runtime
- * through the operator routes the host half serves. It sits directly under the
- * component rows, because the hosted plugins are what the bundle adds to a
- * running harness.
+ * through the operator routes the host half serves. It registers as the
+ * bundle's own configuration, which the page draws between the bundle's
+ * description and its component rows, because the hosted plugins are what the
+ * bundle adds to a running harness.
  *
  * scripts/build-client.mjs inlines the compiled form of this module into the
  * stand-alone client.js bundle, so the module declares no imports and no JSX.
@@ -54,7 +55,7 @@ interface LocaleService {
 /** One slot registration of this module. */
 interface SlotRegistrationOptions {
   readonly name: string
-  readonly id: string
+  readonly key: string
   readonly order?: number
   readonly locale?: string
 }
@@ -62,7 +63,7 @@ interface SlotRegistrationOptions {
 /** Slots service face used by this module. */
 interface SlotsService {
   inject(name: string, callback: () => unknown): unknown
-  register(options: SlotRegistrationOptions, component: (props: DetailSectionProps) => unknown): unknown
+  register(options: SlotRegistrationOptions, component: (props: BundleConfigProps) => unknown): unknown
 }
 
 /** Browser plugin context this module needs. */
@@ -72,15 +73,9 @@ interface ClientContext {
   readonly effect?: ((setup: () => unknown, label?: string) => unknown) | undefined
 }
 
-/** Subject of an open detail page, as the Plugins page passes it to a section. */
-interface PluginsSubject {
-  readonly kind: 'bundle' | 'row' | 'item'
-  readonly pkg?: { readonly name?: string | undefined } | undefined
-}
-
-/** Owner props a detail section is rendered with, plus the localized `t` seat. */
-interface DetailSectionProps {
-  readonly subject?: PluginsSubject | undefined
+/** Owner props a bundle configuration entry renders with, plus the localized `t` seat. */
+interface BundleConfigProps {
+  readonly view?: 'page' | undefined
   readonly t?: Translate | undefined
 }
 
@@ -137,7 +132,7 @@ const PLUGINS_URL = '/mloader/plugins'
 /** Route the host half serves a runtime switch request from. */
 const TOGGLE_URL = '/mloader/plugins/toggle'
 
-/** Package name of the bundle this section belongs to. */
+/** Package name of the bundle this entry is registered for, which is its slot key. */
 const BUNDLE_NAME = 'dsh-mloader'
 
 /** Dictionary key of each lifecycle state the host can report. */
@@ -159,19 +154,6 @@ const STATE_DOTS: Record<PluginState, StateDotState> = {
   failed: 'error',
   disposed: 'idle',
 }
-
-/**
- * Id and rule of the stylesheet the section needs beyond inline styles.
- *
- * The slot renders after the page's source facts, while the plugin list
- * belongs directly under the component rows. Both are flex items of the page's
- * section column, so ordering them by CSS keeps the section in place without
- * touching the page's own DOM or React tree.
- */
-const STYLE_ID = 'dsh-mloader-client-style'
-
-/** Keep the source facts below the external plugin list on this bundle's page. */
-const STYLE_TEXT = '[data-plugin-detail="dsh-mloader"] [data-plugin-source]{order:2}'
 
 /** Both dictionaries the locale registration installs. */
 const DICTIONARIES = {
@@ -219,9 +201,8 @@ const DICTIONARIES = {
   },
 }
 
-/** Inline style of the whole section: the page's own section column item. */
+/** Inline style of the whole section: the page's own configuration column item. */
 const SECTION_STYLE = {
-  order: 1,
   display: 'flex',
   flexDirection: 'column',
   gap: '12px',
@@ -423,29 +404,12 @@ function httpError(body: Record<string, unknown> | null, status: number): string
 }
 
 /**
- * Install the placement stylesheet once.
- *
- * @returns the removal of the stylesheet, or undefined outside a browser or
- * when another application of this plugin already installed it.
- */
-function installStyles(): (() => void) | undefined {
-  if (typeof document === 'undefined') return undefined
-  if (document.getElementById(STYLE_ID) !== null) return undefined
-  const element = document.createElement('style')
-  element.id = STYLE_ID
-  element.textContent = STYLE_TEXT
-  document.head.append(element)
-  return () => { element.remove() }
-}
-
-/**
  * Build the browser half over the supplied dependencies.
  *
  * @param deps - the React namespace and the client primitives the bundle
  * wrapper resolved.
- * @returns the plugin entry; its apply() installs the dictionaries, the
- * placement stylesheet and the detail section when the locale and slots
- * services are present.
+ * @returns the plugin entry; its apply() installs the dictionaries and the
+ * bundle configuration entry when the locale and slots services are present.
  */
 export function createClientCore(deps: ClientCoreDeps): ClientPlugin {
   const react = deps.react
@@ -458,8 +422,8 @@ export function createClientCore(deps: ClientCoreDeps): ClientPlugin {
     return key === undefined ? state : t(key)
   }
 
-  /** The section body, mounted only for the dsh-mloader bundle page. */
-  function ExternalPluginsSectionBody(props: DetailSectionProps): unknown {
+  /** The section body, mounted as the dsh-mloader bundle's configuration. */
+  function ExternalPluginsSectionBody(props: BundleConfigProps): unknown {
     const t = props.t ?? boundTranslate
     const [plugins, setPlugins] = react.useState<PluginSnapshot[]>([])
     const [status, setStatus] = react.useState<LoadStatus>('loading')
@@ -587,14 +551,12 @@ export function createClientCore(deps: ClientCoreDeps): ClientPlugin {
       ...content)
   }
 
-  /** The registered section; it renders only for the dsh-mloader bundle page. */
-  function ExternalPluginsSection(props: DetailSectionProps): unknown {
-    const subject = props.subject
-    if (subject === undefined || subject.kind !== 'bundle' || subject.pkg?.name !== BUNDLE_NAME) return null
+  /** The registered entry; the page draws it as the bundle's own configuration. */
+  function ExternalPluginsSection(props: BundleConfigProps): unknown {
     return react.createElement(ExternalPluginsSectionBody, props)
   }
 
-  /** Install the dictionaries, the placement stylesheet and the plugin detail section. */
+  /** Install the dictionaries and the bundle configuration entry. */
   function apply(ctx: ClientContext): void {
     const slots = ctx.slots
     const locale = ctx.locale
@@ -605,13 +567,9 @@ export function createClientCore(deps: ClientCoreDeps): ClientPlugin {
       locale.register(NS, DICTIONARIES)
     }
     boundTranslate = locale.bind(NS)
-    const removeStyles = installStyles()
-    if (removeStyles !== undefined && typeof ctx.effect === 'function') {
-      ctx.effect(() => removeStyles, 'mloader: placement styles')
-    }
-    slots.inject('plugins.detail.section', () => slots.register({
-      name: 'plugins.detail.section',
-      id: 'mloader-external-plugins',
+    slots.inject('plugins.bundle.config', () => slots.register({
+      name: 'plugins.bundle.config',
+      key: BUNDLE_NAME,
       order: 10,
       locale: NS,
     }, ExternalPluginsSection))
