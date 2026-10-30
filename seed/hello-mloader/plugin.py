@@ -1,15 +1,18 @@
 """Bundled example plugin for dsh-mloader.
 
-The loader releases this directory into ``<profile>/mloader/plugins/`` on first
-start. Edit it freely: the loader skips a plugin directory that already exists
-and never overwrites your changes.
+The loader releases this directory into ``<profile>/mloader/plugins/`` on every
+start and replaces the copy in the profile. Edits are overwritten, because the
+bundled example is the reference copy of the installed loader. The id
+hello-mloader is reserved for this example.
 
-The directory holds two files:
+The directory holds three files:
 
 ``mloader.plugin.json``
     Metadata: id, backend, entry and timeouts.
 ``plugin.py``
     This file.
+``.mloader.builtin.json``
+    Marks the directory as the bundled example for the reserved id.
 
 The plugin demonstrates three capabilities of the runtime:
 
@@ -43,7 +46,7 @@ def apply(ctx):
     :param ctx: The capability context handed to the plugin.
     """
 
-    ctx.logger.info("hello-mloader mounted; this example is yours to edit")
+    ctx.logger.info("hello-mloader mounted; the loader refreshes this example")
 
     @ctx.tools.register(
         name="hello_mloader",
@@ -82,7 +85,8 @@ def apply(ctx):
             "plugin": NAME,
             "hint": (
                 "This tool comes from the bundled example plugin at "
-                "mloader/plugins/hello-mloader/plugin.py in the profile."
+                "mloader/plugins/hello-mloader/plugin.py in the profile; the "
+                "loader refreshes it on every start."
             ),
         }
 

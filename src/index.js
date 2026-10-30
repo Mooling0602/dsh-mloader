@@ -725,12 +725,15 @@ export async function apply(ctx, config = {}) {
     }
     logger?.debug?.(`dsh-mloader: plugin roots = ${roots.join(', ')}`);
     out.detail(`plugin roots: ${roots.join(', ')}`);
-    // Seeding runs before discovery so examples released on this start are mounted in the same run.
+    // Seeding runs before discovery so examples released or refreshed on this start are mounted in the same run.
     const pluginDir = profilePluginsDir(settings.profileDir, baseUrl);
     if (settings.seedExamples !== false && pluginDir !== undefined) {
         const seeded = await installSeedExamples(pluginDir, logger);
         if (seeded?.installed?.length) {
             out.lifecycle(`seeded: ${seeded.installed.join(', ')}`);
+        }
+        if (seeded?.replaced?.length) {
+            out.lifecycle(`refreshed: ${seeded.replaced.join(', ')}`);
         }
     }
     // The shared Python environment is opt-in with the profile plugin root. A

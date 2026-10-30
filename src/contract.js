@@ -87,6 +87,10 @@ export function validateToolSchema(schema, where) {
 export function isValidPluginId(id) {
     return typeof id === 'string' && /^[a-z0-9][a-z0-9_-]{0,31}$/.test(id);
 }
+/** Plugin ids reserved for the bundled example, which is the only allowed user. */
+export const RESERVED_PLUGIN_IDS = new Set(['hello-mloader']);
+/** Marker file that admits a reserved plugin id as the bundled example. */
+export const BUILTIN_MARKER_NAME = '.mloader.builtin.json';
 /** Lifecycle states of an external plugin. */
 export const PLUGIN_STATE = Object.freeze({
     DISCOVERED: 'discovered',

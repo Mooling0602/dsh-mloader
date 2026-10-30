@@ -10,7 +10,7 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { isValidPluginId } from './contract.js'
+import { BUILTIN_MARKER_NAME, isValidPluginId, RESERVED_PLUGIN_IDS } from './contract.js'
 import type {
   BackendKind,
   LoaderLogger,
@@ -63,6 +63,7 @@ async function readManifest(path: string): Promise<PluginSpec> {
   if (!isValidPluginId(id)) {
     throw new Error(`${path}: id ${JSON.stringify(id)} must match ^[a-z0-9][a-z0-9_-]{0,31}$`)
   }
+  if (RESERVED_PLUGIN_IDS.has(id)) await assertBuiltinAllowed(path, baseDir, id)
   const backend = parsed.backend
   if (backend !== 'python' && backend !== 'wasm') {
     throw new Error(`${path}: backend must be "python" or "wasm", got ${JSON.stringify(backend)}`)
@@ -101,6 +102,37 @@ async function readManifest(path: string): Promise<PluginSpec> {
     } satisfies PluginTimeouts,
     env,
     declared: parsed,
+  }
+}
+
+/**
+ * Reject a reserved plugin id unless the directory carries the built-in marker.
+ *
+ * The bundled example is the only plugin allowed to use its id. The marker is
+ * copied with the example, so discovery can distinguish the released copy from
+ * a manifest that only claims the reserved id.
+ *
+ * @param manifestPath - Manifest path, used in the error.
+ * @param baseDir - Directory that holds the manifest.
+ * @param id - Reserved plugin id from the manifest.
+ * @throws {Error} When the marker is missing, unreadable or names another id.
+ */
+async function assertBuiltinAllowed(manifestPath: string, baseDir: string, id: string): Promise<void> {
+  const markerPath = join(baseDir, BUILTIN_MARKER_NAME)
+  let marker: unknown
+  try {
+    marker = JSON.parse(await readFile(markerPath, 'utf8'))
+  } catch {
+    throw new Error(
+      `${manifestPath}: plugin id "${id}" is reserved for the bundled example ` +
+      `and the directory has no valid ${BUILTIN_MARKER_NAME}`,
+    )
+  }
+  if (!isRecord(marker) || marker.id !== id || marker.source !== 'dsh-mloader') {
+    throw new Error(
+      `${manifestPath}: plugin id "${id}" is reserved for the bundled example ` +
+      `and ${BUILTIN_MARKER_NAME} does not match it`,
+    )
   }
 }
 

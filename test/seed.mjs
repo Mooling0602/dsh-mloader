@@ -4,12 +4,13 @@
  * Verifies that installing the loader into a profile releases the example plugin
  * for the operator to read and edit. Covered:
  *   1. First release: files land and content is complete.
- *   2. User changes are never overwritten.
- *   3. Idempotence: repeated runs change nothing.
- *   4. `seedExamples: false` does not touch the disk.
- *   5. An unwritable target does not break the loader (warning only).
- *   6. End to end: release, discovery, apply and a callable tool.
- *   7. The released example is a valid plugin (manifest and tool schema).
+ *   2. An existing copy is replaced on the next release.
+ *   3. Idempotence: repeated runs leave the same file set.
+ *   4. The reserved id is rejected without the built-in marker.
+ *   5. `seedExamples: false` does not touch the disk.
+ *   6. An unwritable target does not break the loader (warning only).
+ *   7. End to end: release, discovery, apply and a callable tool.
+ *   8. The released example is a valid plugin (manifest and tool schema).
  */
 
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, chmod } from 'node:fs/promises'
@@ -77,12 +78,34 @@ async function main() {
     const helloFiles = await readdir(helloDir)
     check('the example has mloader.plugin.json', helloFiles.includes('mloader.plugin.json'), JSON.stringify(helloFiles))
     check('the example has plugin.py', helloFiles.includes('plugin.py'), JSON.stringify(helloFiles))
+    check('the example has the built-in marker', helloFiles.includes('.mloader.builtin.json'), JSON.stringify(helloFiles))
 
     // The example must pass discovery, otherwise releasing it would be pointless.
     const foundSeed = await discover([SEED_DIR], null)
     check('the example passes discovery validation', foundSeed.specs.length >= 1, JSON.stringify(foundSeed.errors))
     check('the example id is hello-mloader', foundSeed.specs.some((spec) => spec.id === 'hello-mloader'),
       JSON.stringify(foundSeed.specs.map((spec) => spec.id)))
+
+    section('1b. The reserved id needs the built-in marker')
+    const reservedRoot = join(tempRoot, 'reserved-root')
+    await mkdir(reservedRoot, { recursive: true })
+    await writeFile(
+      join(reservedRoot, 'mloader.plugin.json'),
+      JSON.stringify({ id: 'hello-mloader', backend: 'python', entry: 'plugin.py' }),
+    )
+    await writeFile(join(reservedRoot, 'plugin.py'), 'pass\n')
+    const rejectedReserved = await discover([reservedRoot], null)
+    check('a reserved id without the marker is rejected', rejectedReserved.specs.length === 0 && rejectedReserved.errors.length === 1,
+      JSON.stringify(rejectedReserved))
+    check('the reason names the reservation', rejectedReserved.errors[0]?.message.includes('reserved'),
+      JSON.stringify(rejectedReserved.errors))
+    await writeFile(
+      join(reservedRoot, '.mloader.builtin.json'),
+      JSON.stringify({ schemaVersion: 1, id: 'hello-mloader', source: 'dsh-mloader' }),
+    )
+    const admittedReserved = await discover([reservedRoot], null)
+    check('the built-in marker admits the reserved id', admittedReserved.specs.some((spec) => spec.id === 'hello-mloader'),
+      JSON.stringify(admittedReserved))
 
     section('2. First release')
     const profileA = join(tempRoot, 'profile-a')
@@ -91,7 +114,7 @@ async function main() {
     const first = await installSeedExamples(targetA, loggerA)
 
     check('hello-mloader was released', first.installed.includes('hello-mloader'), JSON.stringify(first))
-    check('no example was skipped', first.skipped.length === 0, JSON.stringify(first.skipped))
+    check('nothing was replaced on the first run', first.replaced.length === 0, JSON.stringify(first.replaced))
 
     const installedDir = join(targetA, 'hello-mloader')
     const installedFiles = await readdir(installedDir)
@@ -102,21 +125,21 @@ async function main() {
     const targetPy = await readFile(join(installedDir, 'plugin.py'), 'utf8')
     check('content matches the packaged copy', sourcePy === targetPy)
 
-    section('3. User changes are never overwritten')
+    section('3. An existing copy is replaced')
     await writeFile(join(installedDir, 'plugin.py'), '# content edited by the user\n')
     await writeFile(join(installedDir, 'my-notes.txt'), 'my notes')
 
     const loggerB = makeLogger()
     const second = await installSeedExamples(targetA, loggerB)
-    check('the second run skips the existing example', second.skipped.includes('hello-mloader'), JSON.stringify(second))
-    check('the second run installs nothing', second.installed.length === 0, JSON.stringify(second.installed))
+    check('the second run replaces the existing example', second.replaced.includes('hello-mloader'), JSON.stringify(second))
+    check('the second run installs nothing new', second.installed.length === 0, JSON.stringify(second.installed))
 
     const afterEdit = await readFile(join(installedDir, 'plugin.py'), 'utf8')
-    check('the user edited plugin.py is preserved', afterEdit.includes('content edited by the user'), afterEdit.slice(0, 40))
-    const afterNotes = await readFile(join(installedDir, 'my-notes.txt'), 'utf8')
-    check('the user added file is preserved', afterNotes === 'my notes')
+    check('plugin.py matches the packaged copy again', afterEdit === sourcePy, afterEdit.slice(0, 40))
+    const afterFiles = await readdir(installedDir)
+    check('the user added file is removed', !afterFiles.includes('my-notes.txt'), JSON.stringify(afterFiles))
 
-    section('4. Idempotence: repeated runs have no side effect')
+    section('4. Idempotence: repeated runs leave the same file set')
     const snapshots = []
     for (let i = 0; i < 3; i++) {
       await installSeedExamples(targetA, makeLogger())
@@ -211,8 +234,10 @@ async function main() {
     await fiber.dispose()
     await new Promise((resolve) => setTimeout(resolve, 600))
 
-    section('8. The released example is not overwritten on the next start')
-    const filesBefore = (await readdir(join(profileD, 'mloader', 'plugins', 'hello-mloader'))).sort()
+    section('8. The released example is refreshed on the next start')
+    const installedD = join(profileD, 'mloader', 'plugins', 'hello-mloader')
+    await writeFile(join(installedD, 'plugin.py'), '# edited before the next start\n')
+    await writeFile(join(installedD, 'user-extra.txt'), 'extra')
     const root2 = new Context()
     root2.provide('logger', makeLogger())
     root2.provide('systemPrompt', systemPromptStub())
@@ -223,9 +248,10 @@ async function main() {
       { profileDir: profileD, pythonBin: 'python3', statusTool: false, command: false },
     )
     await new Promise((resolve) => setTimeout(resolve, 2500))
-    const filesAfter = (await readdir(join(profileD, 'mloader', 'plugins', 'hello-mloader'))).sort()
-    check('the file list stays the same', filesBefore.join(',') === filesAfter.join(','),
-      `${filesBefore.join(',')} vs ${filesAfter.join(',')}`)
+    const refreshedPy = await readFile(join(installedD, 'plugin.py'), 'utf8')
+    check('the next start replaces the edited entry', refreshedPy === sourcePy, refreshedPy.slice(0, 40))
+    const filesAfter = await readdir(installedD)
+    check('the next start removes extra files', !filesAfter.includes('user-extra.txt'), JSON.stringify(filesAfter))
     const stillApplied = (root2.get('mloader')?.list() ?? []).find((plugin) => plugin.id === 'hello-mloader')
     check('the second start still reports applied', stillApplied?.state === 'applied', JSON.stringify(stillApplied))
     await fiber2.dispose()

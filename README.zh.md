@@ -41,7 +41,7 @@ dsh plugin --profile web remove dsh-mloader
 [mloader] ready: 1 plugin(s) mounted
 ```
 
-之后让模型调用 `hello_mloader` 或 `hello_add`，或者直接输入 `/mloader`。这个示例就是 profile 里的普通插件目录，可以修改，也可以删除。
+之后让模型调用 `hello_mloader` 或 `hello_add`，或者直接输入 `/mloader`。这个示例由加载器维护：每次启动都会替换已安装的副本，`hello-mloader` 这个 id 专供它使用。
 
 ## 插件放在哪里
 
@@ -102,7 +102,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | `enablePyc` | `false` | 是否保留 Python 写在插件旁边的字节码缓存。关闭时每次重新加载都执行磁盘上的代码，开启则是用这个保证换取更快的启动。 |
 | `statusTool` | `true` | 是否为模型注册 `mloader_status` 工具。 |
 | `command` | `true` | `/mloader` 命令：`true` 用默认名，字符串为自定义名，`false` 关闭。 |
-| `seedExamples` | `true` | 首次启动时是否把随包的示例释放到 profile 里。 |
+| `seedExamples` | `true` | 每次启动时是否把随包示例释放并刷新到 profile 里。 |
 | `console` | `true` | 终端输出：`true` 只打印生命周期行，`'verbose'` 连扫描细节一起打印，`false` 静默。 |
 | `watch` | `true` | dsh 运行期间新增或删除的插件目录是否免重启自动挂载和卸载。 |
 | `wasm.enabled` | `false` | 是否启用 WebAssembly 后端。 |

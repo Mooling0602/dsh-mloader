@@ -2,7 +2,7 @@
   "id": "hello-mloader",
   "name": "Hello Mloader (bundled example)",
   "version": "1.0.0",
-  "description": "Bundled example plugin for dsh-mloader: registers tools, subscribes to events and registers cleanup. Edit it freely; the loader never overwrites your changes.",
+  "description": "Bundled example plugin for dsh-mloader: registers tools, subscribes to events and registers cleanup. The loader refreshes this directory on every start.",
   "backend": "python",
   "entry": "plugin.py",
   "enabled": true,

@@ -102,6 +102,8 @@ dsh main process (Node, Cordis)
 | `timeouts.callMs` | 否 | 数字 | `30000` | 一次工具调用或一次事件投递的截止时间，单位毫秒。 |
 | `env` | 否 | 对象 | `{}` | Python 子进程的额外环境变量。值会转成字符串。WebAssembly 后端忽略。 |
 
+`hello-mloader` 这个 id 专供随包示例使用。只有目录中带有 `.mloader.builtin.json`，且其中 id 匹配、`source` 为 `dsh-mloader` 时，发现过程才接受这个 id；带保留 id 而没有有效标记的清单会被拒绝。
+
 未列出的字段会被忽略，不会到达插件。
 
 `targets` 是面向可安装 WebAssembly 包的目标契约。加载器目前不会从归档安装 WebAssembly 插件，以目录安装的 WebAssembly 插件继续使用 `entry`。
@@ -425,7 +427,7 @@ profile 目录从 `ctx.baseUrl` 探测，dsh 把它设为包含活动 `cordis.ym
 
 ### 8.2 随包示例
 
-探测到 profile 且 `seedExamples` 为 `true` 时，加载器在启动时、发现之前，把随包示例 `seed/hello-mloader/` 复制到 `<profile>/mloader/plugins/`。目标目录已存在时，整个示例跳过，什么都不覆盖。`seedExamples: false` 不执行任何文件系统操作。
+探测到 profile 且 `seedExamples` 为 `true` 时，加载器在启动时、发现之前，把随包示例 `seed/hello-mloader/` 复制到 `<profile>/mloader/plugins/`。每次启动都会用随包副本替换已安装副本，包括读者添加的文件；副本携带 `.mloader.builtin.json`，它正是保留 id 的准入标记。`seedExamples: false` 不执行任何文件系统操作。
 
 不要对持有插件的 profile 运行 `dsh --from-default-profile`：该命令会删除整个 profile 目录，包括 `mloader/plugins`。
 

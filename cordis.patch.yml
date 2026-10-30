@@ -40,8 +40,8 @@
         # The optional commands service is probed at runtime; when it is missing
         # the command is skipped and plugin mounting continues.
         command: true
-        # Release the bundled example into <profile>/mloader/plugins on first
-        # start. An existing directory is skipped as a whole and never overwritten.
+        # Release and refresh the bundled example in <profile>/mloader/plugins
+        # on every start. The installed copy is replaced, and its id is reserved.
         seedExamples: true
         # Terminal output: true = lifecycle events only; 'verbose' = scan detail
         # as well; false = silent. It defaults to true because dsh's ctx.logger

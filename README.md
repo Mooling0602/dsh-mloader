@@ -41,7 +41,7 @@ After the restart the loader prints one `[mloader]` line per lifecycle event in 
 [mloader] ready: 1 plugin(s) mounted
 ```
 
-Ask the model to call `hello_mloader` or `hello_add`, or type `/mloader`. The example is a normal plugin directory in the profile, so you can edit it or delete it.
+Ask the model to call `hello_mloader` or `hello_add`, or type `/mloader`. The example is maintained by the loader: every start replaces the installed copy, and the id `hello-mloader` is reserved for it.
 
 ## Where plugins go
 
@@ -102,7 +102,7 @@ Every key is optional. The default column is what dsh-mloader uses when you leav
 | `enablePyc` | `false` | Whether Python keeps the bytecode cache it writes beside a plugin. Off means a reload always runs the code on disk, so turning it on trades that for a faster start. |
 | `statusTool` | `true` | Whether the `mloader_status` tool is registered for the model. |
 | `command` | `true` | The `/mloader` command: `true` for the default name, a string for a custom name, `false` to disable it. |
-| `seedExamples` | `true` | Whether the bundled example is released into the profile on first start. |
+| `seedExamples` | `true` | Whether the bundled example is released and refreshed in the profile on every start. |
 | `console` | `true` | Terminal output: `true` for lifecycle lines, `'verbose'` for scan detail as well, `false` for silence. |
 | `watch` | `true` | Whether plugin directories added or removed while dsh runs are mounted or unmounted without a restart. |
 | `wasm.enabled` | `false` | Whether the WebAssembly backend is enabled. |

@@ -102,6 +102,8 @@ The manifest is the authoritative source of plugin identity and backend selectio
 | `timeouts.callMs` | no | number | `30000` | Deadline for one tool call or one event delivery, in milliseconds. |
 | `env` | no | object | `{}` | Extra environment variables for a Python child process. Values are converted to strings. Ignored by the WebAssembly backend. |
 
+The id `hello-mloader` is reserved for the bundled example. Discovery accepts that id only when the directory carries `.mloader.builtin.json` with the matching id and `source` set to `dsh-mloader`; a manifest with the reserved id and no valid marker is rejected.
+
 Fields that are not listed are ignored and do not reach the plugin.
 
 `targets` is the target contract for installable WebAssembly packages. The loader does not install a WebAssembly plugin from an archive, and a directory-installed WebAssembly plugin continues to use `entry`.
@@ -425,7 +427,7 @@ The profile directory is detected from `ctx.baseUrl`, which dsh sets to the file
 
 ### 8.2 Bundled example
 
-When a profile is detected and `seedExamples` is `true`, the loader copies the bundled example `seed/hello-mloader/` into `<profile>/mloader/plugins/` on startup, before discovery. If the destination directory exists, the example is skipped as a whole and nothing is overwritten. `seedExamples: false` performs no file system work.
+When a profile is detected and `seedExamples` is `true`, the loader copies the bundled example `seed/hello-mloader/` into `<profile>/mloader/plugins/` on startup, before discovery. Every start replaces the installed copy with the packaged copy, including files the reader added, and the copy carries `.mloader.builtin.json`, which is what admits the reserved id. `seedExamples: false` performs no file system work.
 
 Do not run `dsh --from-default-profile` against a profile that holds plugins: that command deletes the whole profile directory, including `mloader/plugins`.
 

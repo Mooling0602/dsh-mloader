@@ -49,7 +49,7 @@ src/
   discovery.ts             scan plugin roots for mloader.plugin.json
   registrar.ts             per-plugin registration ledger and host tool factory
   serialize.ts             projection of live host objects into transportable data
-  seed.ts                  release of the bundled example into the profile
+  seed.ts                  release and refresh of the bundled example in the profile
   watch.ts                 recursive watch on the plugin roots, debounced callback
   console.ts               terminal output channel, separate from ctx.logger
   http.ts                  optional operator HTTP routes behind the web server
@@ -70,7 +70,7 @@ client.js                  committed generated browser bundle
 locale/en.json             title and description the Plugins page renders
 locale/zh.json             Simplified Chinese copy of the same two fields
 tsconfig.client.json       compiler configuration for src/client
-seed/hello-mloader/        bundled example plugin: manifest and plugin.py
+seed/hello-mloader/        bundled example plugin: manifest, plugin.py and built-in marker
 test/                      21 self-contained suites and their fixtures
 docs/ABI-unified.md        shared plugin contract
 docs/Package.md             shared package format and install rules, implemented for Python
@@ -238,7 +238,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `exec-payload.mjs` | 43 | host exec objects cross the process boundary safely; tools stay usable after a dirty payload | no |
 | `command.mjs` | 72 | the `/mloader` command group on a real command runtime: list, detail, load, unload, reload, usage and reserved words | no |
 | `profile-install.mjs` | 37 | profile path resolution and plugin loading, including `ctx.baseUrl` | no |
-| `seed.mjs` | 28 | bundled example release, including never overwriting user changes | no |
+| `seed.mjs` | 33 | bundled example release and refresh, reserved id enforcement and the built-in marker | no |
 | `crash-safety.mjs` | 10 | EPIPE, orphan process and unload hang resistance | no |
 | `console.mjs` | 19 | terminal output levels and write failure tolerance | no |
 | `plugin-toggle.mjs` | 62 | runtime switches through the operator routes: real load and unload, manual enable of a manifest-disabled plugin, crash recovery, route removal and the non-web compatibility case | no |
@@ -251,7 +251,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `python-package.mjs` | 44 | pack, install, requirements merge, install index, update confirmation, trash removal, the Python 3.10 TOML fallback, the requirements only venv path and unsafe archive rejection | no |
 | `python-env.mjs` | 20 | shared profile environment, installed SDK console script, uv requirement, venv module fallback, and the loader starting a plugin with the shared interpreter | no |
 
-The baseline is 524 assertions across 21 suites, 32 of them requiring a compiled `.wasm` fixture. A run without the two binaries reports 492 assertions passed and skips the two WebAssembly suites. Skipping is an environment gap, not a pass: those suites verify that a looping WebAssembly plugin cannot block the host, which is a safety property.
+The baseline is 529 assertions across 21 suites, 32 of them requiring a compiled `.wasm` fixture. A run without the two binaries reports 497 assertions passed and skips the two WebAssembly suites. Skipping is an environment gap, not a pass: those suites verify that a looping WebAssembly plugin cannot block the host, which is a safety property.
 
 ### WebAssembly fixtures
 
@@ -292,7 +292,7 @@ The defaults are defined in `src/index.ts` and repeated in `cordis.patch.yml`. A
 | `enablePyc` | `false` | Keep the `__pycache__` directory a Python plugin writes when the interpreter loads its entry file. It is off by default, so a reload always runs the code currently on disk. Enabling it trades that guarantee for a faster start. |
 | `statusTool` | `true` | Register the `mloader_status` tool for the model. |
 | `command` | `true` | Register the `/mloader` command group. `false` disables it; a string sets a custom command name matching `^[a-z][a-z0-9_-]*$`. |
-| `seedExamples` | `true` | Release the bundled example into the profile plugin directory on first start. |
+| `seedExamples` | `true` | Release and refresh the bundled example in the profile plugin directory on every start. |
 | `console` | `true` | Terminal output: `true` for lifecycle events, `'verbose'` for scan detail, `false` for silence. |
 | `watch` | `true` | Mount a plugin directory installed while the loader runs and unmount one that is deleted. `false` installs no watcher, so a new plugin needs a restart. |
 | `wasm.enabled` | `false` | Enable the WebAssembly backend. It is off by default. |
@@ -317,7 +317,7 @@ A code change to the loader needs a dsh restart before it takes effect. Ask the 
    [mloader] ready: 1 plugin(s) mounted
    ```
 
-   No `[mloader]` line means `console` is off, or no plugin root was found. The loader warns in the latter case with `profile directory not detected; <profile>/mloader/plugins was skipped` or `no plugin roots configured`.
+   A later start logs `[mloader] refreshed: hello-mloader` instead of `seeded` because the installed copy is replaced. No `[mloader]` line means `console` is off, or no plugin root was found. The loader warns in the latter case with `profile directory not detected; <profile>/mloader/plugins was skipped` or `no plugin roots configured`.
 
 2. **Operator surfaces agree.** `/mloader` lists the same plugins as the `mloader_status` tool, each with backend, state, tools and events. The dsh-mloader bundle detail page on the dsh Plugins page shows the External plugins section, and a switch changes the plugin state immediately.
 
@@ -437,10 +437,11 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **A manifest with `enabled: false` is discovered and skipped.** The record is created in state `disabled` so the operator surfaces can report it.
 - **`autoEnable: false` leaves plugins in `discovered`** without starting them.
 - **Reload stops the old backend before it starts a new one.** Two backend instances never run for the same plugin id. The new Python process imports the plugin module again, so module level state does not survive a reload.
-- **The seed never overwrites anything.** If the destination directory exists, the example is skipped as a whole. Merging or updating would destroy the edits the user made to the example, which is the advertised way to start a plugin.
+- **The bundled example is refreshed on every start.** The target directory is removed and the packaged copy is written in its place, including files the user added. The example is maintained by the loader, so local edits do not survive a restart; this is what keeps the reference code current.
+- **The bundled id is reserved.** `hello-mloader` is accepted only when the directory carries `.mloader.builtin.json` with a matching id and `source` set to `dsh-mloader`. A manifest with that id and no valid marker is rejected during discovery.
 - **The seed runs before plugin discovery.** The released example is loaded in the same startup, so a fresh install has a working tool without a second restart.
 - **Seed and plugin failures are warnings, not fatal.** A read-only profile, a full disk or an unreadable bundled seed directory must not stop the loader from hosting the plugins that are already there. The bundled seed directory is `<repo>/seed`.
-- **A released example must pass discovery like any other plugin.** Release is not a privilege: if the example's manifest is invalid, discovery reports it and the loader continues.
+- **A released example must pass discovery like any other plugin.** Release is not a privilege: if the example's manifest is invalid, or its built-in marker is missing, discovery reports it and the loader continues.
 - **The seed is skipped when no profile directory is known.** The loader does not write into a directory it cannot identify as the active profile.
 - **`mloader_status` and the `/mloader` list share one formatter.** Both call `buildStatus` and `format` from `tools/status.ts`; a change to one surface updates the other by construction. A list query returns `{ count, plugins, byBackend, byState }`; the model's tool also accepts an id and then returns `{ plugin }` rather than `{ plugins }`, and the formatter must accept both shapes. A snapshot carries `id`, `name`, `version`, `backend`, `state`, `tools`, `events` and `registrations`, plus `error` only when the plugin has failed.
 - **The command service is optional.** The loader does not inject `commands`; it probes `ctx.get('commands')` at runtime and skips command registration with a debug log when the service is missing. A missing command must never prevent plugin mounting.

@@ -79,7 +79,7 @@ interface LoaderConfig {
   statusTool?: boolean
   /** Register the `/mloader` command, optionally with a custom name. Defaults to true. */
   command?: boolean | string
-  /** Release the bundled examples into the profile before discovery. Defaults to true. */
+  /** Release and refresh the bundled examples in the profile before discovery. Defaults to true. */
   seedExamples?: boolean
   /** Terminal output: `false`, `true`, or `'verbose'`. Defaults to true. */
   console?: boolean | 'verbose'
@@ -814,12 +814,15 @@ export async function apply(ctx: LoaderContext, config: LoaderConfig = {}): Prom
   logger?.debug?.(`dsh-mloader: plugin roots = ${roots.join(', ')}`)
   out.detail(`plugin roots: ${roots.join(', ')}`)
 
-  // Seeding runs before discovery so examples released on this start are mounted in the same run.
+  // Seeding runs before discovery so examples released or refreshed on this start are mounted in the same run.
   const pluginDir = profilePluginsDir(settings.profileDir, baseUrl)
   if (settings.seedExamples !== false && pluginDir !== undefined) {
     const seeded = await installSeedExamples(pluginDir, logger)
     if (seeded?.installed?.length) {
       out.lifecycle(`seeded: ${seeded.installed.join(', ')}`)
+    }
+    if (seeded?.replaced?.length) {
+      out.lifecycle(`refreshed: ${seeded.replaced.join(', ')}`)
     }
   }
 
