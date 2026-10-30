@@ -13,7 +13,7 @@
  * @module backends/python
  */
 import { spawn } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROTOCOL_VERSION } from '../contract.js';
 import { projectEventArgs } from '../serialize.js';
@@ -68,6 +68,7 @@ export class PythonBackendInstance {
     capabilities;
     logger;
     pythonBin;
+    venvDir;
     onCrash;
     enablePyc;
     child = null;
@@ -88,10 +89,11 @@ export class PythonBackendInstance {
      * @param options - Logger, interpreter and crash callback.
      */
     constructor(spec, options = {}) {
-        const { logger, pythonBin = 'python3', onCrash, enablePyc = false } = options;
+        const { logger, pythonBin = 'python3', venvDir, onCrash, enablePyc = false } = options;
         this.spec = spec;
         this.logger = logger;
         this.pythonBin = pythonBin;
+        this.venvDir = venvDir;
         this.onCrash = onCrash;
         this.enablePyc = enablePyc;
         this.capabilities = { tools: true, events: true, logger: true, effect: true };
@@ -118,6 +120,14 @@ export class PythonBackendInstance {
             if (key.startsWith('DSH_'))
                 continue;
             env[key] = value;
+        }
+        if (this.venvDir !== undefined) {
+            // The interpreter already knows its prefix. VIRTUAL_ENV and the PATH entry
+            // make a child process a plugin starts resolve the same environment.
+            env.VIRTUAL_ENV = this.venvDir;
+            const bin = join(this.venvDir, process.platform === 'win32' ? 'Scripts' : 'bin');
+            const pathKey = Object.keys(env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
+            env[pathKey] = `${bin}${delimiter}${env[pathKey] ?? ''}`;
         }
         Object.assign(env, spec.env, { PYTHONUNBUFFERED: '1' });
         // The interpreter caches compiled bytecode beside the entry file and

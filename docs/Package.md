@@ -4,7 +4,7 @@ English | [简体中文](Package.zh.md)
 
 This document specifies the archive that carries an installable dsh-mloader plugin and the installation, update and removal rules that every package shares. It applies to Python packages and to WebAssembly packages. The backend-specific layout is in [python-sdk/Package](python-sdk/Package.md) and [wasm/Package](wasm/Package.md).
 
-Status: target contract. The loader does not install a plugin from an archive; a plugin is a directory under a plugin root. This document fixes the archive and installation shape before the implementation lands, so a packager and the loader agree on one form from the start.
+Status: the Python backend implements this document through the runtime command line specified in [python-sdk/Package](python-sdk/Package.md) section 6. The WebAssembly backend remains a target contract. The loader itself never installs a plugin from an archive: installation writes the extracted directory that the loader discovers.
 
 A package is a zip archive. It holds one plugin manifest at the archive root and the files that manifest names. The loader extracts the archive before it loads anything, so the archive is a transport format and never the directory the plugin runs from. The manifest decides the backend, the entry point and the platform targets, which means the archive layout and the manifest cannot disagree.
 
@@ -41,13 +41,13 @@ A package is untrusted input, so the loader validates every archive entry before
 - An entry with an absolute path is rejected.
 - An entry whose path escapes the plugin directory through `..` is rejected.
 - A symbolic link entry is rejected.
-- An archive that exceeds the limit on entry count or on unpacked size is rejected.
+- An archive that exceeds the limit on entry count or on unpacked size is rejected. The current limits are 4096 entries and 512 MiB of uncompressed content.
 
 A rejected package leaves no partial plugin directory behind.
 
 ## 4. Installation, updates and removal
 
-The contents of a package are extracted before the loader can load them. The loader never imports code from inside an archive, so an archive that is present but not installed contributes no plugin.
+The contents of a package are extracted before the loader can load them. The loader never imports code from inside an archive, so an archive that is present but not installed contributes no plugin. For Python, the command line in [python-sdk/Package](python-sdk/Package.md) section 6 performs the extraction, the update checks and the index write. The loader still only reads installed directories.
 
 For a profile named `web`, a package whose manifest sets `"id": "test"` extracts to this directory:
 
@@ -75,7 +75,7 @@ The loader writes `.mloader.index.json` into the extracted plugin directory. It 
 
 `fileMd5` covers the files the archive provided. The index never lists itself, because it is written after the extraction finished.
 
-A packager may ship a `.mloader.index.json` in the archive to publish per file checksums ahead of installation. Such an index may set `schemaVersion`, `id` and `fileMd5`, and must not set `installedAt`, `updatedAt`, `packageFile` or `packageMd5`, because those describe an installation that the packager did not perform. When the archive carries one, the loader keeps its `fileMd5` and fills the installation fields itself, so a field the loader owns always wins over the archived value.
+A packager may ship a `.mloader.index.json` in the archive to publish per file checksums ahead of installation. Such an index may set `schemaVersion`, `id` and `fileMd5`, and must not set `installedAt`, `updatedAt`, `packageFile` or `packageMd5`, because those describe an installation that the packager did not perform. When the archive carries one, the installer verifies the archive entries against its `fileMd5` before extraction and writes a fresh index for the installed files. The installed index covers the final directory, which for a Python plugin may hold a merged `pyproject.toml` and no `requirements.txt`, so a field the installer owns always wins over the archived value.
 
 ### 4.2 Updates
 
@@ -86,7 +86,7 @@ Installing a newer package over an existing plugin is how a plugin is updated. B
 | The MD5 differs | The installed plugin directory moves to the trash, and the new package extracts in its place. |
 | The MD5 matches | The archive is byte identical to the installed one. The loader asks for a second confirmation before it reinstalls. |
 
-The comparison is over the archive file as bytes, so an archive repacked from identical content carries a different MD5 whenever the zip metadata differs, which is what a rebuild does. A repacked archive is therefore treated as a new version even when the plugin source did not change.
+The comparison is over the archive file as bytes, so an archive repacked from identical content carries a different MD5 whenever the zip metadata differs, which is what a rebuild does. A repacked archive is therefore treated as a new version even when the plugin source did not change. The Python command line expresses the second confirmation as `--force`.
 
 The trash is the platform trash directory when the environment provides one. When it does not, the installed directory moves under `$TMPDIR` instead, and that location does not survive a reboot. An update replaces the previous installation, so the trash is a recovery window and not a rollback point.
 
@@ -94,7 +94,7 @@ When the installed index carries `fileMd5`, the loader verifies the files on dis
 
 ### 4.3 Removal
 
-A plugin is removed by deleting its directory under `mloader/plugins`, or by moving it to the trash. The loader offers the same operation and asks for a second confirmation first. Removing a plugin never touches the archive it was installed from, so the same archive installs it again.
+A plugin is removed by deleting its directory under `mloader/plugins`, or by moving it to the trash. The loader offers the same operation and asks for a second confirmation first. The Python command line expresses that confirmation as `--yes`. Removing a plugin never touches the archive it was installed from, so the same archive installs it again.
 
 ## 5. Version compatibility
 
@@ -105,7 +105,7 @@ The manifest schema is versioned separately. A package whose manifest violates t
 ## 6. Limits of the format
 
 - **No signature and no publisher identity.** `packageMd5` detects that the archive changed. It does not authenticate who built it, and the loader has no trust store. Install a package only from a source you trust.
-- **No dependency resolution.** The archive carries only the files the packager includes. A package cannot declare a dependency for the loader to install.
+- **No dependency contract in the shared format.** The archive carries only the files the packager includes. A Python package adds one in [python-sdk/Package](python-sdk/Package.md) section 4, where the runtime installs the declared dependencies into the shared profile environment. A WebAssembly package cannot declare a dependency.
 - **No install hook.** Installation never executes plugin code, so a package cannot run a setup step, import a module or call a function.
 - **No rollback.** An update moves the previous directory to the trash. The trash is a recovery window, not a rollback point.
 - **No partial install.** A rejected package leaves no plugin directory behind.
@@ -114,6 +114,6 @@ The manifest schema is versioned separately. A package whose manifest violates t
 ## 7. Packager checklist
 
 - The manifest is at the archive root.
-- The archive carries one plugin and satisfies the backend layout rules of [python-sdk/Package](python-sdk/Package.md) or [wasm/Package](wasm/Package.md).
+- The archive carries one plugin and satisfies the backend layout rules of [python-sdk/Package](python-sdk/Package.md) or [wasm/Package](wasm/Package.md). A Python package may carry `pyproject.toml` and `requirements.txt`; the Python layout specifies how they are merged.
 - Build the release archive once and distribute that file. Repacking identical content changes the MD5 because the zip metadata changes, and the loader treats the result as a new version.
 - A packager may include a `.mloader.index.json` with `fileMd5` to publish per file checksums ahead of installation. Section 4.1 states the fields a shipped index may set.

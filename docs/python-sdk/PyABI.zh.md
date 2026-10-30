@@ -21,9 +21,9 @@
 
 ### 1.1 导入名与许可证
 
-运行时随加载器仓库一起发布，位于 `src/runtime/python_sdk/`，并额外采用 MIT 许可证。它是一个扁平包，导入名是 `dsh_mloader_sdk`，只用标准库，要求 Python 3.10 或更高版本。它分为 `channel`、`context`、`errors`、`runtime` 和 `version` 模块。插件代码通常从包根导入公共名称，这些模块也可以直接导入，例如 `from dsh_mloader_sdk.context import Context`。
+运行时随加载器仓库一起发布，位于 `src/runtime/python_sdk/`，并额外采用 MIT 许可证。它是一个扁平包，导入名是 `dsh_mloader_sdk`，只用标准库，要求 Python 3.10 或更高版本。它分为 `channel`、`context`、`errors`、`runtime` 和 `version` 模块。它还携带 [Python 包](Package.zh.md) 第 6 节描述的打包命令行，即 `cli`、`dependencies`、`environment`、`packaging`、`trash`、`run_cli` 和 `__main__` 模块；这些模块不属于插件导入面。插件代码通常从包根导入公共名称，这些模块也可以直接导入，例如 `from dsh_mloader_sdk.context import Context`。
 
-这个包本身不可安装：它没有 `pyproject.toml`。单独的仓库 `dsh-mloader-python-sdk` 携带打包元数据、镜像这个目录，是插件作者可以依赖的分发物。加载器里的副本在运行时是权威。
+这个包本身没有 `pyproject.toml`。加载器通过生成的 wheel 把副本安装进 profile 环境，并提供 `dsh-mloader-sdk` 命令；单独的仓库 `dsh-mloader-python-sdk` 携带分发元数据、镜像这个目录，是插件作者可以依赖的分发物。加载器里的副本在运行时是权威。
 
 ### 1.2 公共名称
 
@@ -45,11 +45,13 @@
 
 ### 1.3 启动
 
-加载器这样启动 Python 插件：
+加载器用 profile 的共享解释器启动 Python 插件：
 
 ```sh
-<pythonBin> -u <loader>/src/runtime/python_sdk/launch.py <plugin entry>
+<profile>/mloader/.venv/bin/python -u <loader>/src/runtime/python_sdk/launch.py <plugin entry>
 ```
+
+Windows 下解释器是 `<profile>/mloader/.venv/Scripts/python.exe`。环境在第一个 Python 插件启动前由配置的 `pythonBin` 用 uv 创建，见 [Python 包](Package.zh.md) 第 5 节。加载器不管理 profile 环境时，直接启动配置的 `pythonBin`。
 
 插件基目录是工作目录。`launch.py` 先把三个标准流重新配置为 UTF-8，再从它所在目录加载包并注册到 `sys.modules`，所以 `from dsh_mloader_sdk import ...` 解析到 `launch.py` 旁边的副本，即使解释器里装了同名包。然后它把入口文件所在目录插到 `sys.path` 最前面，把控制权交给运行时。
 
@@ -183,10 +185,12 @@ def add(args):
 
 ### 6.1 启动与环境
 
-- 命令是 `<pythonBin> -u <launch.py> <absolute entry>`，工作目录是插件基目录。
+- 命令是 `<shared python> -u <launch.py> <absolute entry>`，工作目录是插件基目录。加载器管理 profile 环境时，共享解释器是第 1.3 节的 profile 环境；否则是 `pythonBin`。
+- 进程启动前，加载器运行运行时命令行，按需创建环境并安装插件声明的依赖。安装器从不导入插件代码。
 - 进程是长生命周期的。它不是每次调用都启动。
 - 子进程以 `PYTHONUNBUFFERED=1` 运行。
-- 进程启动前会清理继承的环境：名字匹配 `KEY`、`PASSWORD`、`SECRET` 或 `TOKEN`（不区分大小写）的变量，以及任何以 `DSH_` 开头的变量都会被移除。清单的 `env` 对象随后应用，可以设置任何值。
+- 使用共享环境时，子进程会收到 `VIRTUAL_ENV`，以及把环境二进制目录放在最前面的 `PATH` 条目。
+- 进程启动前会清理继承的环境：名字匹配 `KEY`、`PASSWORD`、`SECRET` 或 `TOKEN`（不区分大小写）的变量，以及任何以 `DSH_` 开头的变量都会被移除。清单的 `env` 对象随后应用，可以设置任何值，包括 `PATH`。
 - 除非加载器选项 `enablePyc` 为 true，后端会设置 `PYTHONDONTWRITEBYTECODE=1`。第 8 节说明原因和取舍。
 - 文件系统和网络不受限制。进程边界隔离崩溃，不隔离权限；[ABI-unified](../ABI-unified.zh.md) 第 7 节说明安全模型。
 

@@ -22,6 +22,10 @@
         # automatically (the loader takes the profile location from ctx.baseUrl).
         roots: []
         autoEnable: true
+        # Base interpreter used to create the shared Python environment at
+        # <profile>/mloader/.venv. Python plugins run in that environment, and
+        # uv must be on PATH. The value is used when the environment does not
+        # exist yet.
         pythonBin: python3
         # Keep the bytecode cache the Python interpreter writes beside a plugin
         # entry. It is off by default because the interpreter invalidates a cache

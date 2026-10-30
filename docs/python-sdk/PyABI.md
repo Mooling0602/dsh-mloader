@@ -21,9 +21,9 @@ The protocol version is 1. A change to a frame shape, a manifest field or the ca
 
 ### 1.1 Import name and licensing
 
-The runtime ships in the loader repository under `src/runtime/python_sdk/` and is additionally MIT licensed. It is a flat package with import name `dsh_mloader_sdk`, standard library only, requiring Python 3.10 or later. It is split into the modules `channel`, `context`, `errors`, `runtime` and `version`. Plugin code normally imports the public names from the package root, and those modules are also importable directly, for example `from dsh_mloader_sdk.context import Context`.
+The runtime ships in the loader repository under `src/runtime/python_sdk/` and is additionally MIT licensed. It is a flat package with import name `dsh_mloader_sdk`, standard library only, requiring Python 3.10 or later. It is split into the modules `channel`, `context`, `errors`, `runtime` and `version`. It also carries the packaging command line described in [Python package](Package.md) section 6, in the modules `cli`, `dependencies`, `environment`, `packaging`, `trash`, `run_cli` and `__main__`; those modules are not part of the plugin import surface. Plugin code normally imports the public names from the package root, and those modules are also importable directly, for example `from dsh_mloader_sdk.context import Context`.
 
-The package is not installable by itself: it has no `pyproject.toml`. The separate repository `dsh-mloader-python-sdk` carries the packaging metadata, mirrors this directory and is the distribution a plugin author may depend on. The copy in the loader is authoritative at run time.
+The package has no `pyproject.toml` of its own. The loader installs a copy into the profile environment through a generated wheel and exposes the `dsh-mloader-sdk` command; the separate repository `dsh-mloader-python-sdk` carries the distribution metadata, mirrors this directory and is the distribution a plugin author may depend on. The copy in the loader is authoritative at run time.
 
 ### 1.2 Public names
 
@@ -45,11 +45,13 @@ Both registration styles derive the result schema from the handler's return anno
 
 ### 1.3 Launch
 
-The loader starts a Python plugin as:
+The loader starts a Python plugin with the shared interpreter of the profile:
 
 ```sh
-<pythonBin> -u <loader>/src/runtime/python_sdk/launch.py <plugin entry>
+<profile>/mloader/.venv/bin/python -u <loader>/src/runtime/python_sdk/launch.py <plugin entry>
 ```
+
+On Windows the interpreter is `<profile>/mloader/.venv/Scripts/python.exe`. The environment is created from the configured `pythonBin` with uv before the first Python plugin starts, as specified in [Python package](Package.md) section 5. When the loader does not manage a profile environment, it starts the configured `pythonBin` directly.
 
 The plugin base directory is the working directory. `launch.py` reconfigures the three standard streams to UTF-8, loads the package from the directory that contains it and registers it in `sys.modules`, so `from dsh_mloader_sdk import ...` resolves to the copy shipped beside `launch.py` even when a package with the same name is installed in the interpreter. It then inserts the directory of the entry file at the front of `sys.path` and hands control to the runtime.
 
@@ -183,10 +185,12 @@ An explicit `output` argument always wins. A plugin that needs a schema the tabl
 
 ### 6.1 Spawn and environment
 
-- The command is `<pythonBin> -u <launch.py> <absolute entry>`, and the working directory is the plugin base directory.
+- The command is `<shared python> -u <launch.py> <absolute entry>`, and the working directory is the plugin base directory. The shared interpreter is the profile environment of section 1.3 when the loader manages one, and `pythonBin` otherwise.
+- Before the process starts, the loader runs the runtime command line to create the environment when needed and install the dependencies the plugin declares. The installer never imports plugin code.
 - The process is long lived. It is not started per call.
 - The child runs with `PYTHONUNBUFFERED=1`.
-- The inherited environment is sanitized before the process starts: variables whose names match `KEY`, `PASSWORD`, `SECRET` or `TOKEN` (case-insensitive), and any variable starting with `DSH_`, are removed. The manifest `env` object is applied afterwards and may set any value.
+- When the shared environment is used, the child receives `VIRTUAL_ENV` and a `PATH` entry that puts the environment binaries first.
+- The inherited environment is sanitized before the process starts: variables whose names match `KEY`, `PASSWORD`, `SECRET` or `TOKEN` (case-insensitive), and any variable starting with `DSH_`, are removed. The manifest `env` object is applied afterwards and may set any value, including `PATH`.
 - The backend sets `PYTHONDONTWRITEBYTECODE=1` unless the loader option `enablePyc` is true. Section 8 states the reason and the trade-off.
 - The file system and the network are not restricted. The process boundary isolates crashes, it does not isolate permissions; section 7 of [ABI-unified](../ABI-unified.md) states the security model.
 

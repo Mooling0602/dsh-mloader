@@ -54,6 +54,7 @@ src/
   console.ts               terminal output channel, separate from ctx.logger
   http.ts                  optional operator HTTP routes behind the web server
   types.ts                 structural types of the host surface and plugin boundary
+  python-env.ts            shared profile virtual environment bridge, calls the Python CLI
   backends/
     python.ts              Python child process and NDJSON transport
     wasm.ts                WebAssembly host side: worker lifecycle and timeouts
@@ -61,7 +62,7 @@ src/
   client/
     core.ts                browser half: the External plugins section
   runtime/
-    python_sdk/            canonical Python runtime package, import dsh_mloader_sdk
+    python_sdk/            canonical Python runtime package and packaging command line
   tools/status.ts          mloader_status tool and the shared status formatter
   commands/mloader.ts      /mloader command group, called by the user
 scripts/build-client.mjs   deterministic build of the committed client bundle
@@ -70,11 +71,11 @@ locale/en.json             title and description the Plugins page renders
 locale/zh.json             Simplified Chinese copy of the same two fields
 tsconfig.client.json       compiler configuration for src/client
 seed/hello-mloader/        bundled example plugin: manifest and plugin.py
-test/                      19 self-contained suites and their fixtures
+test/                      21 self-contained suites and their fixtures
 docs/ABI-unified.md        shared plugin contract
-docs/Package.md             shared package format and install rules
+docs/Package.md             shared package format and install rules, implemented for Python
 docs/python-sdk/PyABI.md   Python backend contract and SDK
-docs/python-sdk/Package.md Python package layout
+docs/python-sdk/Package.md Python package layout, dependencies and command line
 docs/wasm/WasmABI.md       WebAssembly core ABI
 docs/wasm/Package.md       WebAssembly package targets and layout
 ```
@@ -87,7 +88,7 @@ The test tree holds the suites directly under `test/`, the Python and WebAssembl
 
 `.markdownlint.json` records the line wrapping policy that section 7 of `AGENTS.md` states as a rule. It disables `MD013`, which counts the characters in a line, because a paragraph is one complete line with no width limit. It sets `siblings_only` on `MD024`, which permits two headings with the same text when they have different parents while a duplicate among siblings is still an error. Both repositories carry the same file, so a checkout lints to the same expectations as the published copy.
 
-The Python SDK is a flat package. Its content is the directory `src/runtime/python_sdk/`: `__init__.py`, `launch.py`, `channel.py`, `context.py`, `errors.py`, `runtime.py`, `version.py`, `py.typed` and `LICENSE`. There is no nested package directory inside it.
+The Python SDK is a flat package. Its content is the directory `src/runtime/python_sdk/`: `__init__.py`, `launch.py`, `channel.py`, `context.py`, `errors.py`, `runtime.py`, `version.py`, `dependencies.py`, `environment.py`, `packaging.py`, `trash.py`, `cli.py`, `__main__.py`, `run_cli.py`, `py.typed` and `LICENSE`. There is no nested package directory inside it.
 
 ### Build and artifact policy
 
@@ -97,7 +98,7 @@ The Python SDK is a flat package. Its content is the directory `src/runtime/pyth
 - Never edit or document a generated `.js` file. Change the `.ts` file, run `pnpm build`, and commit the result. The WASM backend resolves the worker path from the compiled `src/backends/wasm.js` to `wasm-worker.js` beside it, so the emit layout is part of the runtime behavior.
 - TypeScript and `@types/node` are development-only dependencies. There is no runtime dependency and no `prepare` script, so installing from git does not need a compiler.
 - `pnpm check` runs `tsc -p tsconfig.json --noEmit` and `tsc -p tsconfig.client.json --noEmit`, so both the host and the browser half are type checked.
-- The package requires Node.js 20 or later (`engines.node`). Python plugins require Python 3.10 or later.
+- The package requires Node.js 20 or later (`engines.node`). Python plugins require Python 3.10 or later. The shared Python environment requires `uv` on `PATH`; a requirements only plugin can fall back to the venv module.
 
 ### Browser half
 
@@ -114,9 +115,13 @@ The Python SDK is a flat package. Its content is the directory `src/runtime/pyth
 
 - The Python runtime is written in Python, not TypeScript, so it lives under `src/runtime/` rather than `src/` proper. `src/runtime/` is reserved for language code that is not JavaScript or TypeScript.
 - The canonical source is `src/runtime/python_sdk/`. It is a flat package with import name `dsh_mloader_sdk`, standard library only, requiring Python 3.10 or later, and additionally licensed MIT while the repository stays LGPL-3.0-only.
-- The loader starts a plugin with `<pythonBin> -u <repo>/src/runtime/python_sdk/launch.py <absolute plugin entry>`, with the plugin base directory as `cwd`. The Python backend derives the `launch.py` path from its own compiled location under `src/backends/`, passes the absolute `spec.entry`, and starts the child in `spec.baseDir`. `launch.py` loads the package by path and registers it in `sys.modules`, so `from dsh_mloader_sdk import plugin` resolves to the copy shipped beside `launch.py`, never to an installed package of the same name.
+- The loader starts a plugin with the shared profile interpreter, `<profile>/mloader/.venv/bin/python -u <repo>/src/runtime/python_sdk/launch.py <absolute plugin entry>`, with the plugin base directory as `cwd`. The Python backend derives the `launch.py` path from its own compiled location under `src/backends/`, passes the absolute `spec.entry`, and starts the child in `spec.baseDir`. When no profile is known the backend uses `pythonBin` and does no environment management. `launch.py` loads the package by path and registers it in `sys.modules`, so `from dsh_mloader_sdk import plugin` resolves to the copy shipped beside `launch.py`, never to an installed package of the same name.
 - `launch.py` reconfigures the three standard streams to UTF-8 before it touches the protocol, because the backend encodes requests and decodes both output streams as UTF-8 regardless of the child environment. `stdin` decodes undecodable bytes to the replacement character, which yields a line the runtime skips, and both output streams escape a character UTF-8 cannot carry, which keeps a frame parseable. The setting survives `PYTHONIOENCODING` and an ASCII locale with the UTF-8 mode off.
-- The package is not installable by itself: it has no `pyproject.toml`. Packaging metadata belongs to the separate SDK repository.
+- The package has no `pyproject.toml` of its own. The loader installs a copy into the profile environment through a generated wheel and writes the `dsh-mloader-sdk` console script; the separate SDK repository still owns distribution metadata. The packaging command line is standard library only and runs from the loader copy through `run_cli.py`, or from the installed copy through `dsh-mloader-sdk` and `python -m dsh_mloader_sdk`.
+- `src/python-env.ts` runs the command line before each Python plugin starts: `<interpreter> -u <runtime>/run_cli.py env sync --profile <profile> --plugin <plugin-dir> --python <pythonBin> --json`, where the interpreter is the shared environment Python when it exists and `pythonBin` otherwise. The result carries the environment interpreter, the management mode (`uv`, `python-venv` or `none`), the dependency list and the warnings. The loader passes the interpreter to the backend and logs the warnings against the plugin id.
+- The environment is shared by every Python plugin of a profile. `uv` creates it at `<profile>/mloader/.venv` with `uv venv --seed`; a plugin with `pyproject.toml` has its `[project].dependencies` installed with `uv pip install`. `requirements.txt` entries that pyproject does not name are added in memory for the install. A package installed by the CLI has them merged into its installed `pyproject.toml`, and the file is not extracted. A plugin with only `requirements.txt` creates the environment with `python -m venv` and installs with the venv pip, and the loader warns. `requires-python` is reported and ignored because version selection is not implemented.
+- The environment is profile scoped and opt-in with the profile root: when `profilePlugins` is `false` and `profileDir` is not set, the loader uses `pythonBin` directly. This keeps the isolated suites from touching the real profile.
+- The environment also holds the runtime package. `ensure_shared_venv` builds a wheel from `src/runtime/python_sdk/`, installs it with the venv pip and checks a source fingerprint carried in the wheel version, so a loader update replaces the installed copy. Activation provides the `dsh-mloader-sdk` command, which derives the profile from `<profile>/mloader/.venv`.
 
 ### Generated SDK copy
 
@@ -138,7 +143,7 @@ dsh-mloader-python-sdk/
   tests/test_protocol_roundtrip.py
 ```
 
-The wheel built by the SDK repository includes `py.typed` and the MIT `LICENSE` as package data.
+The wheel built by the SDK repository includes `py.typed` and the MIT `LICENSE` as package data. The generated copy also carries the packaging command line, so the distribution can expose `python -m dsh_mloader_sdk` after installation.
 
 ### Profile side
 
@@ -147,10 +152,12 @@ The wheel built by the SDK repository includes `py.typed` and the MIT `LICENSE` 
   cordis.patch.yml         loader overrides, only when defaults are changed
   package.json             dsh.profile.bundles lists dsh-mloader
   mloader/
+    .venv/                 shared Python environment and the dsh-mloader-sdk command
     plugins/               installed external plugins, discovered automatically
+      <plugin-id>/         optional pyproject.toml declares its PyPI dependencies
 ```
 
-The workspace holds code and the profile holds configuration and plugins. Changing the loader code never touches the profile. Installing a plugin never touches the loader package directory.
+The workspace holds code and the profile holds configuration and plugins. Changing the loader code never touches the profile. Installing a plugin never touches the loader package directory. The shared environment belongs to the profile and is not part of the loader package.
 
 ## 4. Commands and testing
 
@@ -171,6 +178,21 @@ dsh --profile web --dump-config | grep -A 12 'id: dsh-mloader'
 ```
 
 `dsh plugin` forwards its arguments to pnpm inside the profile directory, and dsh adds the package to `dsh.profile.bundles` because the package declares `dsh.bundle.patch`. No manual edit of the profile is needed. Removing the loader does not remove the plugins under `<profile>/mloader/plugins`.
+
+### Python plugin packages
+
+The loader installs the Python SDK into `<profile>/mloader/.venv` and writes the `dsh-mloader-sdk` command. Activate the environment to use it:
+
+```bash
+source ~/.dsh/profiles/web/mloader/.venv/bin/activate
+dsh-mloader-sdk pack ./my-plugin
+dsh-mloader-sdk install ./my-plugin-0.1.0.mloader.pack
+dsh-mloader-sdk remove my-plugin --yes
+```
+
+The command derives the profile from the environment path, so `--profile` is optional; it still selects another profile when supplied. The same commands are available from a checkout through `python3 src/runtime/python_sdk/run_cli.py`, and from an installed package through `<profile>/node_modules/dsh-mloader/src/runtime/python_sdk/run_cli.py`.
+
+`install` writes the directory the loader discovers, merges requirements into pyproject, prepares the shared environment and writes `.mloader.index.json`. It never runs the plugin entry. `--force` confirms a reinstall of the same archive or of a directory whose files changed after installation. `uv` must be on `PATH`; a requirements only package may create the environment with `python -m venv` and reports a warning.
 
 ### Build
 
@@ -226,8 +248,10 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `encoding.mjs` | 4 | UTF-8 standard streams survive a manifest that sets `PYTHONIOENCODING` to ASCII, for a non-ASCII value and for a stray non-ASCII diagnostic | no |
 | `bytecode.mjs` | 4 | no `__pycache__` under the default, and one under `enablePyc: true` | no |
 | `package-meta.mjs` | 16 | the locale files, their `meta.title` and `meta.description`, the exports that expose them and the `files` entry that ships them | no |
+| `python-package.mjs` | 44 | pack, install, requirements merge, install index, update confirmation, trash removal, the Python 3.10 TOML fallback, the requirements only venv path and unsafe archive rejection | no |
+| `python-env.mjs` | 20 | shared profile environment, installed SDK console script, uv requirement, venv module fallback, and the loader starting a plugin with the shared interpreter | no |
 
-The baseline is 460 assertions across 19 suites, 32 of them requiring a compiled `.wasm` fixture. A run without the two binaries reports 428 assertions passed and skips the two WebAssembly suites. Skipping is an environment gap, not a pass: those suites verify that a looping WebAssembly plugin cannot block the host, which is a safety property.
+The baseline is 524 assertions across 21 suites, 32 of them requiring a compiled `.wasm` fixture. A run without the two binaries reports 492 assertions passed and skips the two WebAssembly suites. Skipping is an environment gap, not a pass: those suites verify that a looping WebAssembly plugin cannot block the host, which is a safety property.
 
 ### WebAssembly fixtures
 
@@ -261,10 +285,10 @@ The defaults are defined in `src/index.ts` and repeated in `cordis.patch.yml`. A
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `roots` | `[]` | Extra plugin root directories. Leave empty; the profile plugin directory is discovered automatically. |
-| `profilePlugins` | `true` | Append `<profile>/mloader/plugins` to the roots. Set to `false` to use only explicit roots. |
+| `profilePlugins` | `true` | Append `<profile>/mloader/plugins` to the roots. Set to `false` to use only explicit roots; the shared Python environment is then disabled unless `profileDir` is set. |
 | `profileDir` | `undefined` | Override the detected profile directory. Intended for tests, never for production. |
 | `autoEnable` | `true` | Start every plugin whose manifest has `enabled: true`. When `false`, plugins stay `discovered`. |
-| `pythonBin` | `"python3"` | Python interpreter used for Python plugins. |
+| `pythonBin` | `"python3"` | Base interpreter used to create the shared profile environment. Python plugins run with the environment interpreter; this value is not consulted again while that interpreter exists. |
 | `enablePyc` | `false` | Keep the `__pycache__` directory a Python plugin writes when the interpreter loads its entry file. It is off by default, so a reload always runs the code currently on disk. Enabling it trades that guarantee for a faster start. |
 | `statusTool` | `true` | Register the `mloader_status` tool for the model. |
 | `command` | `true` | Register the `/mloader` command group. `false` disables it; a string sets a custom command name matching `^[a-z][a-z0-9_-]*$`. |
@@ -301,7 +325,7 @@ A code change to the loader needs a dsh restart before it takes effect. Ask the 
 
 4. **Deadlock regression.** The bundled example subscribes to `tools/execute` and logs from the handler. Call any tool several times: every call returns promptly. A hang here means the event dispatch or one-way logging rule was broken.
 
-5. **One process per Python plugin.** `ps -ef | grep launch.py` shows one process per applied Python plugin, owned by the dsh process.
+5. **One process per Python plugin, in the shared environment.** `ps -ef | grep launch.py` shows one process per applied Python plugin, owned by the dsh process, and its command line starts with `<profile>/mloader/.venv/bin/python`. The first Python plugin creates `<profile>/mloader/.venv`. A Python plugin that fails before its process starts reports the environment error in its `failed` state.
 
 6. **Hot refresh.** Copy a plugin directory into `<profile>/mloader/plugins` while dsh runs. The terminal prints `[mloader] rescan added 1 and removed 0 plugin(s)` and the mount line for the new plugin, and its tools appear without a restart. Delete the directory again: the terminal prints `[mloader] unloaded <id>` and the tools are revoked. With `watch: false` neither line appears.
 
@@ -442,6 +466,15 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
   Route failures are logged and answered from inside the route, and route registration is removed with the injected web server scope.
 - **The internal service is not an external API.** `ctx.provide('mloader', ...)` is an operator surface for loader-side code, not a capability of external plugins. The structural context type does not promise `provide`, so the call is guarded.
 
+### 5.11 Shared Python environment
+
+- **The environment is profile scoped and shared.** Every Python plugin of one profile runs in `<profile>/mloader/.venv`. The path is fixed; there is no per-plugin environment and no Python version selection. Two plugins that need incompatible versions of one package cannot both be satisfied.
+- **The command line owns creation and dependency installation.** `src/python-env.ts` runs `run_cli.py env sync` before each Python plugin starts and passes the returned interpreter to the backend. The CLI creates the environment with `uv venv --seed`, installs the runtime SDK wheel and its `dsh-mloader-sdk` command, reads `pyproject.toml` and `requirements.txt`, installs the dependency set and returns warnings as JSON on stdout. The loader logs each warning against the plugin id.
+- **uv is required for the pyproject path.** A plugin with `pyproject.toml` fails to start with a clear error when `uv` is not on `PATH`. A plugin with only `requirements.txt` is the one fallback: it creates the environment with `python -m venv` and installs with the venv pip, and the loader warns that uv is the supported manager.
+- **The environment is opt-in with the profile root.** When `profilePlugins` is `false` and `profileDir` is not set, the loader uses `pythonBin` directly and creates no environment. That keeps the isolated suites from touching the real profile.
+- **The install index is written after the merge and the dependency install.** `install` extracts to a staging directory, merges requirements only entries into pyproject.toml, installs the environment, writes `.mloader.index.json`, and only then replaces the installed directory. A failure leaves the previous installation in place. The old directory moves to the platform trash, or under `$TMPDIR` when the platform provides none.
+- **Installation never imports plugin code.** `pack` and `install` read files, validate the archive, run uv or pip and write the index. Neither command loads the entry file.
+
 ## 6. External-plugin author constraints
 
 - **The plugin is not a Cordis plugin.** It has no `ctx` beyond the four namespaces, no service injection and no place in plugin management. The loader hosts it and the harness never sees it, so a plugin cannot register a service, cannot inject one, cannot add a plugin entry to the host and cannot observe the loader's own lifecycle.
@@ -451,6 +484,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **An event handler must return immediately and must not wait for the host.** Logging is the only host call that is safe from inside a handler. The host dispatches with a timeout, so a handler that blocks is a handler that gets cut off.
 - **`stdout` belongs to the protocol.** Use `ctx.logger` or `stderr` for diagnostics. A stray write to `stdout` corrupts a frame and is read as a protocol error rather than as output.
 - **Tool results must be JSON serializable.** A raised exception becomes a tool error and leaves the process alive. A result the projection cannot represent is rejected at the call, again without killing the child.
+- **A Python plugin shares the profile environment.** Declare PyPI dependencies in `pyproject.toml` under `[project].dependencies`; `requirements.txt` is the older form and uses pip. A plugin cannot request a Python version or an isolated environment.
 - **A WebAssembly plugin exports the five core symbols** and must not depend on host imports beyond what `docs/wasm/WasmABI.md` section 1 declares. The WebAssembly backend stays off unless `wasm.enabled` is turned on.
 - **Operator surfaces are not plugin capabilities.** The Plugins-page switches, the two HTTP routes and the `/mloader` command belong to dsh-mloader; an external plugin cannot call or rely on them. They may also change without notice, because they are not part of the ABI.
 - **Plugins are independent works.** The loader license does not apply to them, and the loader places no requirement on how a plugin is licensed.

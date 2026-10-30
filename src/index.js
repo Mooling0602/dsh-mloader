@@ -28,6 +28,7 @@
 import { discover } from './discovery.js';
 import { PluginRegistrar } from './registrar.js';
 import { PythonBackendInstance } from './backends/python.js';
+import { syncPythonEnvironment } from './python-env.js';
 import { PLUGIN_STATE, profilePluginsDir, resolveProfileDir, resolveRoots } from './contract.js';
 import { WasmBackendInstance } from './backends/wasm.js';
 import { createStatusTool } from './tools/status.js';
@@ -363,10 +364,18 @@ export class PluginManager {
     async #start(record) {
         const spec = record.spec;
         record.state = PLUGIN_STATE.LOADED;
+        const environment = spec.backend === 'python'
+            ? await this.#preparePythonEnvironment(spec)
+            : undefined;
+        // Teardown has nothing to stop yet, but it must not wait for a backend that
+        // the aborted startup would create after the environment finished.
+        if (this.aborted)
+            return undefined;
         const instance = spec.backend === 'python'
             ? new PythonBackendInstance(spec, {
                 logger: this.logger,
-                pythonBin: this.config.pythonBin,
+                pythonBin: environment?.python ?? this.config.pythonBin,
+                venvDir: environment?.venv,
                 enablePyc: this.config.enablePyc,
                 onCrash: (pluginId, info) => this.#onPythonCrash(record, pluginId, info),
             })
@@ -393,6 +402,32 @@ export class PluginManager {
         const toolSuffix = tools.length > 0 ? `, tools: ${tools.join(', ')}` : '';
         this.out.lifecycle(`mounted ${spec.id} (${spec.backend}${toolSuffix})`);
         return result;
+    }
+    /**
+     * Prepare the shared Python environment for one plugin.
+     *
+     * The Python runtime command line creates the profile environment with uv,
+     * installs the plugin dependencies and returns the interpreter. Warnings are
+     * logged against the plugin id. Without a detected profile the loader keeps
+     * the configured interpreter and performs no environment management.
+     *
+     * @param spec - Plugin specification of a Python plugin.
+     * @returns The shared environment, or undefined when no profile is known.
+     * @throws {Error} When the environment cannot be prepared.
+     */
+    async #preparePythonEnvironment(spec) {
+        const environment = await syncPythonEnvironment(spec.baseDir, {
+            profileDir: this.config.profileDir,
+            pythonBin: this.config.pythonBin ?? 'python3',
+            logger: this.logger,
+        });
+        if (environment === undefined)
+            return undefined;
+        for (const warning of environment.warnings) {
+            this.logger?.warn?.(`[${spec.id}] ${warning}`);
+        }
+        this.logger?.debug?.(`[${spec.id}] shared python environment: ${environment.python} (${environment.mode})`);
+        return environment;
     }
     /**
      * Start a record and clean up after a failed start.
@@ -698,7 +733,18 @@ export async function apply(ctx, config = {}) {
             out.lifecycle(`seeded: ${seeded.installed.join(', ')}`);
         }
     }
-    const manager = new PluginManager(ctx, logger, { ...settings, resolvedRoots: roots, out });
+    // The shared Python environment is opt-in with the profile plugin root. A
+    // caller that disables that root and does not name a profile directory keeps
+    // the configured interpreter, which is what the isolated test processes need.
+    const environmentProfile = wantProfileDir || settings.profileDir !== undefined
+        ? detectedProfile
+        : undefined;
+    const manager = new PluginManager(ctx, logger, {
+        ...settings,
+        resolvedRoots: roots,
+        out,
+        profileDir: environmentProfile,
+    });
     // Cordis does not export its fiber state enum, so active is the literal 2.
     const FIBER_ACTIVE = 2;
     const onStatus = (fiber, oldState) => {

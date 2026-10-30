@@ -8,7 +8,7 @@
 
 - [python-sdk/PyABI](python-sdk/PyABI.zh.md) 规定 Python 运行时包、两种注册风格、结果 schema 推断和子进程传输。
 - [wasm/WasmABI](wasm/WasmABI.zh.md) 规定 WebAssembly 核心 ABI 和 worker 隔离。
-- [Package](Package.zh.md) 规定两种后端共用的归档格式和安装规则，是目标契约。
+- [Package](Package.zh.md) 规定两种后端共用的归档格式和安装规则。Python 后端通过运行时命令行实现它；WebAssembly 后端仍是目标契约。
 - [python-sdk/Package](python-sdk/Package.zh.md) 和 [wasm/Package](wasm/Package.zh.md) 规定各后端的包布局。
 
 当前线上协议是版本 1。修改帧形状、清单字段或能力白名单都是契约变更；跨越进程或线程边界的变更需要提升协议版本。
@@ -104,7 +104,7 @@ dsh main process (Node, Cordis)
 
 未列出的字段会被忽略，不会到达插件。
 
-`targets` 是面向可安装 WebAssembly 包的目标契约。加载器目前不会从归档安装插件，以目录安装的 WebAssembly 插件继续使用 `entry`。
+`targets` 是面向可安装 WebAssembly 包的目标契约。加载器目前不会从归档安装 WebAssembly 插件，以目录安装的 WebAssembly 插件继续使用 `entry`。
 
 ### 2.2 发现
 
@@ -392,10 +392,12 @@ Python 沙箱是进程隔离，不是权限隔离。Python 插件可以读写文
   cordis.patch.yml
   package.json
   mloader/
+    .venv/                 共享 Python 环境，用 uv 或 venv 模块创建
     plugins/
       <plugin-id>/
         mloader.plugin.json
         plugin.py
+        pyproject.toml     可选的 Python 依赖
       <other-plugin>/
         mloader.plugin.json
         hello.wasm
@@ -403,7 +405,7 @@ Python 沙箱是进程隔离，不是权限隔离。Python 插件可以读写文
 
 目录名只是约定。插件 id 来自清单，不来自目录名。
 
-插件通过把它的目录放进一个插件根目录来安装。[Package](Package.zh.md) 里的包格式是从归档安装插件的目标契约；加载器目前不读取归档。
+插件通过把它的目录放进一个插件根目录来安装。Python 包可以用运行时命令行从归档安装；命令见 [python-sdk/Package](python-sdk/Package.zh.md) 第 6 节，加载器本身从不读取归档。加载器管理共享环境时，一个 profile 的 Python 插件都在该环境中运行，所以需要隔离依赖集合的插件不受支持。[Package](Package.zh.md) 的包格式对 Python 已实现，对 WebAssembly 仍是目标契约。
 
 profile 的 `node_modules` 不是受支持的安装位置。它归包管理器所有，`pnpm install` 或 `pnpm prune` 可以重建它，所以手工放在那里的插件不稳定。
 
@@ -451,3 +453,5 @@ dsh-mloader 为运行 dsh 的人提供三个操作界面：
 8. 默认不启用 WebAssembly 后端，也不随包提供 WebAssembly 示例。
 9. 不自动重启崩溃的插件。
 10. 不监听已安装插件内部的文件。清单或入口文件变化只有在重新加载或重启后才生效。
+11. 不给 Python 插件单独的环境，也不选择 Python 版本。同一个 profile 的所有 Python 插件共用一个由配置解释器创建的环境。
+12. 不自行从归档安装包。Python 运行时命令行负责这项安装。

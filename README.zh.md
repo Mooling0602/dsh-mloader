@@ -19,7 +19,7 @@ dsh plugin --profile web add github:Mooling0602/dsh-mloader
 dsh plugin --profile web add github:Mooling0602/dsh-mloader#v0.1.0
 ```
 
-安装完成后重启 dsh。加载器不需要配置，dsh 会自己把这个包加进 `dsh.profile.bundles`。包内已经带有构建好的 JavaScript，且没有运行时依赖，所以安装过程不需要编译。
+安装完成后重启 dsh。加载器不需要配置，dsh 会自己把这个包加进 `dsh.profile.bundles`。包内已经带有构建好的 JavaScript，且没有运行时依赖，所以安装过程不需要编译。Python 插件需要 Python 3.10 或更高版本，并且 PATH 内需要能找到 `uv`。
 
 默认值就是可用的。想改某一项时，在 profile 的 `cordis.patch.yml` 里用同一个 id 覆盖即可；下面「配置」一节说明每个键的作用。
 
@@ -53,6 +53,20 @@ dsh plugin --profile web remove dsh-mloader
 
 插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见 [CONTEXT](CONTEXT.md)。监听默认开启，关掉的方法见[配置](#配置)，关掉之后新增插件需要重启 dsh。
 
+## Python 依赖
+
+同一个 profile 下的所有 Python 插件共用一个虚拟环境：`~/.dsh/profiles/<profile>/mloader/.venv`。加载器通常在第一个 Python 插件启动时用 uv 创建它，之后用这个环境启动每个插件。第三方包声明在 `pyproject.toml` 的 `[project].dependencies` 中；也支持 `requirements.txt`。两个文件同时存在时，同一个包以 pyproject 为准，只有 requirements.txt 才有的条目会在安装时合并进 pyproject。只带 `requirements.txt` 的插件改用 Python 的 venv 模块和 pip 安装，并给出警告。暂不支持选择 Python 版本，也不支持按插件隔离环境，所以插件共享同一套依赖。
+
+加载器会把 Python SDK 安装进这个环境，并提供 `dsh-mloader-sdk` 命令。激活环境后就能使用：
+
+```sh
+source ~/.dsh/profiles/<profile>/mloader/.venv/bin/activate
+dsh-mloader-sdk --help
+dsh-mloader-sdk install ./my-plugin.mloader.pack
+```
+
+命令会从环境路径推导 profile。完整命令参考见 [Python 包](docs/python-sdk/Package.zh.md) 第 6 节。
+
 ## 查看与切换插件
 
 两个入口读取同一份快照：
@@ -81,10 +95,10 @@ dsh plugin --profile web remove dsh-mloader
 | 键 | 默认 | 作用 |
 | --- | --- | --- |
 | `roots` | `[]` | 在 profile 目录之外额外扫描的插件根目录。 |
-| `profilePlugins` | `true` | 是否扫描 `<profile>/mloader/plugins`。设为 `false` 时只扫描 `roots`。 |
+| `profilePlugins` | `true` | 是否扫描 `<profile>/mloader/plugins`。设为 `false` 时只扫描 `roots`，并且除非设置了 `profileDir`，否则不启用共享 Python 环境。 |
 | `profileDir` | 自动探测 | 覆盖加载器通过 dsh 解析到的 profile 目录，不设置时自动探测。用于测试。 |
 | `autoEnable` | `true` | 已安装的插件是否随 dsh 启动。`false` 时插件保持发现状态，需要手动加载。 |
-| `pythonBin` | `python3` | Python 插件使用的解释器。 |
+| `pythonBin` | `python3` | 用来创建共享环境的基础 Python 解释器。Python 插件在该环境中运行。 |
 | `enablePyc` | `false` | 是否保留 Python 写在插件旁边的字节码缓存。关闭时每次重新加载都执行磁盘上的代码，开启则是用这个保证换取更快的启动。 |
 | `statusTool` | `true` | 是否为模型注册 `mloader_status` 工具。 |
 | `command` | `true` | `/mloader` 命令：`true` 用默认名，字符串为自定义名，`false` 关闭。 |
@@ -100,8 +114,8 @@ dsh plugin --profile web remove dsh-mloader
 - [docs/ABI-unified](docs/ABI-unified.zh.md)：面向第三方插件作者的共享契约，包括清单格式、能力白名单、RPC 协议、生命周期、后端接口、安全模型和安装布局。
 - [docs/python-sdk/PyABI](docs/python-sdk/PyABI.zh.md)：Python 后端契约，包括 SDK 导入方式、两种注册风格、结果 schema 推断和进程传输。
 - [docs/wasm/WasmABI](docs/wasm/WasmABI.zh.md)：WebAssembly 核心 ABI，包括必需导出、声明对象和 worker 超时。
-- [docs/Package](docs/Package.zh.md)：两种后端共用的归档格式与安装规则，目标契约。
-- [docs/python-sdk/Package](docs/python-sdk/Package.zh.md)：Python 插件包布局，目标契约。
+- [docs/Package](docs/Package.zh.md)：两种后端共用的归档格式与安装规则。Python 后端已经实现，WebAssembly 后端仍是目标契约。
+- [docs/python-sdk/Package](docs/python-sdk/Package.zh.md)：Python 插件包布局、依赖、共享环境和命令行。
 - [docs/wasm/Package](docs/wasm/Package.zh.md)：WebAssembly 插件包的目标元数据与目录布局，目标契约。
 - [CONTEXT](CONTEXT.md)：面向维护者的技术细节，包括构建与产物策略、配置默认值、测试方法和重启验收清单。
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk)：Python SDK 包，是 `src/runtime/python_sdk/` 的镜像，带打包元数据和测试。

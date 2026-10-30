@@ -8,7 +8,7 @@ The companion documents specify the backend contracts and the package format:
 
 - [python-sdk/PyABI](python-sdk/PyABI.md) specifies the Python runtime package, the two registration styles, the result schema inference and the child process transport.
 - [wasm/WasmABI](wasm/WasmABI.md) specifies the WebAssembly core ABI and the worker isolation.
-- [Package](Package.md) specifies the archive format and the installation rules shared by both backends, as a target contract.
+- [Package](Package.md) specifies the archive format and the installation rules shared by both backends. The Python backend implements it through the runtime command line; the WebAssembly backend remains a target contract.
 - [python-sdk/Package](python-sdk/Package.md) and [wasm/Package](wasm/Package.md) specify the backend package layouts.
 
 The current wire protocol is version 1. A change to a frame shape, a manifest field or the capability whitelist is a contract change, and a change that crosses the process or thread boundary requires a protocol version bump.
@@ -104,7 +104,7 @@ The manifest is the authoritative source of plugin identity and backend selectio
 
 Fields that are not listed are ignored and do not reach the plugin.
 
-`targets` is the target contract for installable WebAssembly packages. The loader does not install a plugin from an archive, and a directory-installed WebAssembly plugin continues to use `entry`.
+`targets` is the target contract for installable WebAssembly packages. The loader does not install a WebAssembly plugin from an archive, and a directory-installed WebAssembly plugin continues to use `entry`.
 
 ### 2.2 Discovery
 
@@ -392,10 +392,12 @@ External plugins are installed under the profile, not inside the loader package:
   cordis.patch.yml
   package.json
   mloader/
+    .venv/                 shared Python environment, created with uv or the venv module
     plugins/
       <plugin-id>/
         mloader.plugin.json
         plugin.py
+        pyproject.toml     optional Python dependencies
       <other-plugin>/
         mloader.plugin.json
         hello.wasm
@@ -403,7 +405,7 @@ External plugins are installed under the profile, not inside the loader package:
 
 The directory name is a convention. The plugin id comes from the manifest, not from the directory name.
 
-A plugin is installed by placing its directory under one of the plugin roots. The package format in [Package](Package.md) is a target contract for installing a plugin from an archive; the loader does not read an archive.
+A plugin is installed by placing its directory under one of the plugin roots. A Python package can be installed from an archive with the runtime command line; [python-sdk/Package](python-sdk/Package.md) section 6 specifies the commands, and the loader itself never reads an archive. Python plugins run in the shared environment of the profile when the loader manages one, so a plugin that needs an isolated dependency set is not supported. The package format in [Package](Package.md) is implemented for Python and remains a target contract for WebAssembly.
 
 The profile's `node_modules` is not a supported install location. It is owned by the package manager, and `pnpm install` or `pnpm prune` can rebuild it, so hand-placed plugins there are not stable.
 
@@ -451,3 +453,5 @@ They are internal to dsh-mloader and are not part of the external plugin ABI. An
 8. It does not enable the WebAssembly backend by default, and it ships no bundled WebAssembly example.
 9. It does not restart a crashed plugin automatically.
 10. It does not watch the files inside an installed plugin. A changed manifest or entry file takes effect only after a reload or a restart.
+11. It does not give a Python plugin its own environment or select a Python version. All Python plugins of one profile share one environment created from the configured interpreter.
+12. It does not install a package from an archive on its own. The Python runtime command line performs that installation.
