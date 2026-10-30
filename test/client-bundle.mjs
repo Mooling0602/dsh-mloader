@@ -73,6 +73,8 @@ const primitives = {
   PluginArtworkDefault: primitiveStub('stub-artwork'),
   StateDot: primitiveStub('stub-state-dot'),
   Switch: primitiveStub('stub-switch'),
+  SettingsForm: primitiveStub('stub-settings-form'),
+  SettingsValueField: primitiveStub('stub-settings-value-field'),
 }
 
 /** Visit every element in a rendered tree, including arrays of children. */
@@ -156,7 +158,10 @@ async function main() {
   const ctx = {
     slots: {
       inject(name, callback) { capture.injections.push(name); return callback() },
-      register(options, Component) { capture.registration = { options, Component }; return () => {} },
+      register(options, Component) {
+        if (options.name === 'plugins.bundle.config') capture.registration = { options, Component }
+        return () => {}
+      },
     },
     locale: {
       register(namespace, dictionaries) { capture.locales.push({ namespace, dictionaries }); return () => {} },
@@ -166,8 +171,15 @@ async function main() {
   }
   pluginEntry.apply(ctx)
 
-  await check('apply injects the plugins.bundle.config slot once', () => {
+  await check('apply injects the bundle configuration slot', () => {
     assert.deepEqual(capture.injections, ['plugins.bundle.config'])
+  })
+  await check('the bundle page includes the configuration and external plugins', () => {
+    const page = capture.registration.Component({ view: 'page' })
+    assert.equal(page.tag, 'div')
+    assert.equal(page.children[0].children[0], 'configTitle')
+    assert.equal(typeof page.children[1].tag, 'function')
+    assert.equal(typeof page.children[2].tag, 'function')
   })
   await check('the registration carries the expected identity', () => {
     assert.notEqual(capture.registration, null)
@@ -207,18 +219,85 @@ async function main() {
   await check('the component renders for the empty owner props of a page view', () => {
     const tree = Component({ view: 'page' })
     assert.notEqual(tree, null)
-    assert.equal(typeof tree.tag, 'function')
+    assert.equal(tree.tag, 'div')
   })
   await check('the section head and the loading state render', () => {
     const tree = Component({ view: 'page' })
     assert.notEqual(tree, null)
-    assert.equal(typeof tree.tag, 'function')
-    const body = tree.tag(tree.props)
+    const external = tree.children[2]
+    const body = external.tag(external.props)
     assert.notEqual(body, null)
     assert.equal(body.props['data-mloader'], 'external-plugins')
+    assert.equal(body.props.style.marginTop, '24px')
     const texts = textsOf(body)
     assert.ok(texts.includes('title'))
     assert.ok(texts.includes('loading'))
+  })
+
+  await check('configuration form submits only changed values and refreshes its revision', async () => {
+    const originalUseState = react.useState
+    const originalFetch = globalThis.fetch
+    const baseline = {
+      roots: '', profilePlugins: true, autoEnable: true, pythonBin: 'python3', shellPath: '/old/bin',
+      enablePyc: false, statusTool: true, command: 'true', seedExamples: true, console: 'true',
+      watch: true, wasmEnabled: false,
+    }
+    const values = [{ ...baseline }, { ...baseline }, 'a'.repeat(64), 'ready', '', 0]
+    let hook = 0
+    react.useState = () => {
+      const index = hook++
+      return [values[index], (next) => { values[index] = typeof next === 'function' ? next(values[index]) : next }]
+    }
+    const requests = []
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, init })
+      if (init.method === 'POST') return { ok: true, status: 200, json: async () => ({ saved: true }) }
+      return { ok: true, status: 200, json: async () => ({
+        revision: 'b'.repeat(64), config: { ...baseline, roots: [], shellPath: ['/new/bin'], command: true, console: true },
+      }) }
+    }
+    try {
+      react.useState = originalUseState
+      const configElement = capture.registration.Component({ view: 'page' }).children[1]
+      assert.equal(typeof configElement.tag, 'function')
+      react.useState = () => {
+        const index = hook++
+        return [values[index], (next) => { values[index] = typeof next === 'function' ? next(values[index]) : next }]
+      }
+      const render = () => { hook = 0; return expandComponents(configElement.tag(configElement.props)) }
+      let form = render()
+      const inputs = elementsOf(form).filter((item) => item.tag === 'textarea')
+      assert.equal(inputs.length, 2)
+      inputs[1].props.onChange({ target: { value: '/new/bin' } })
+      form = render()
+      const settings = elementsOf(form).find((item) => item.tag === 'stub-settings-form')
+      assert.equal(settings.props.state.dirty, true)
+      assert.equal(settings.props.state.invalid, false)
+      assert.equal(elementsOf(form).filter((item) => item.tag === 'stub-switch').length, 7)
+      const fields = elementsOf(form).filter((item) => item.tag === 'stub-settings-value-field')
+      assert.equal(fields.length, 2)
+      fields[0].props.onEdit('')
+      let changed = elementsOf(render()).find((item) => item.tag === 'stub-settings-form')
+      assert.equal(changed.props.state.invalid, true)
+      changed.props.onDiscard()
+      assert.equal(values[0].shellPath, '/old/bin')
+      assert.equal(values[0].pythonBin, 'python3')
+      inputs[1].props.onChange({ target: { value: '/new/bin' } })
+      changed = elementsOf(render()).find((item) => item.tag === 'stub-settings-form')
+      assert.equal(changed.props.state.invalid, false)
+      changed.props.onSave()
+      await settle()
+      assert.equal(requests[0].url, '/mloader/config')
+      assert.deepEqual(JSON.parse(requests[0].init.body), {
+        revision: 'a'.repeat(64), changes: { shellPath: ['/new/bin'] },
+      })
+      assert.equal(requests[1].init.method, undefined)
+      assert.equal(values[2], 'b'.repeat(64))
+      assert.equal(values[4], 'configSaved')
+    } finally {
+      react.useState = originalUseState
+      globalThis.fetch = originalFetch
+    }
   })
 
   section('4. Rows and runtime switches')
@@ -237,7 +316,7 @@ async function main() {
       return [typeof initial === 'function' ? initial() : initial, setter]
     }
     try {
-      const wrapper = Component({ view: 'page' })
+      const wrapper = Component({ view: 'page' }).children[2]
       const body = expandComponents(wrapper.tag(wrapper.props))
       return { body, elements: elementsOf(body), updates }
     } finally {

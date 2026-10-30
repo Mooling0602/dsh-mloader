@@ -82,7 +82,9 @@ In a web profile, the dsh-mloader bundle detail page on the dsh Plugins page has
 
 ## Configuration
 
-The defaults are already correct. To change one, target the `dsh-mloader` id in the profile's `cordis.patch.yml` and restart dsh:
+The defaults are already correct. On the web Plugins page, open the dsh-mloader bundle to edit and save the loader settings. Saving uses the active profile's configuration editor and can reload the loader. The editor writes the complete current loader configuration as a profile override. If the bundled example refresh is enabled, reloading replaces local changes in the example directory.
+
+Alternatively, target the `dsh-mloader` id in the profile's `cordis.patch.yml`:
 
 ```yaml
 - id: dsh-mloader
@@ -101,7 +103,7 @@ Every key is optional. The default column is what dsh-mloader uses when you leav
 | `pythonBin` | `python3` | The base Python interpreter used to create the shared environment. Python plugins run in that environment. |
 | `shellPath` | `[]` | Directories to prepend to the PATH used by Python environment setup and plugins. Use absolute paths; `~` is not expanded. |
 | `enablePyc` | `false` | Whether Python keeps the bytecode cache it writes beside a plugin. Off means a reload always runs the code on disk, so turning it on trades that for a faster start. |
-| `statusTool` | `true` | Whether the `mloader_status` tool is registered for the model. |
+| `statusTool` | `true` | Whether the plugin status and management tools are registered for the model. |
 | `command` | `true` | The `/mloader` command: `true` for the default name, a string for a custom name, `false` to disable it. |
 | `seedExamples` | `true` | Whether the bundled example is released and refreshed in the profile on every start. |
 | `console` | `true` | Terminal output: `true` for lifecycle lines, `'verbose'` for scan detail as well, `false` for silence. |

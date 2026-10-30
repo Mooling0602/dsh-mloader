@@ -438,7 +438,7 @@ Loader configuration is operator material. The key reference is in [CONTEXT](../
 dsh-mloader exposes three operator surfaces for the person running dsh:
 
 - the External plugins section on the dsh Plugins page, which lists the hosted plugins and switches them on and off at runtime;
-- two HTTP routes under `/mloader` that serve the plugin list and the runtime switch to the browser half;
+- HTTP routes under `/mloader` that serve the plugin list, runtime switch and loader configuration to the browser half;
 - the `/mloader` slash command group.
 
 They are internal to dsh-mloader and are not part of the external plugin ABI. An external plugin cannot call them, cannot register on them, and must not depend on their request or response shapes. The browser section and the HTTP routes exist only in a web profile; a non-web dsh profile mounts the loader and hosts plugins without them, and the slash command exists only when the optional commands service is available.

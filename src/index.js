@@ -784,11 +784,11 @@ export async function apply(ctx, config = {}) {
         disable: (id) => manager.disable(id),
         reload: (id) => manager.reload(id),
     };
-    for (const tool of createManagementTools(target)) {
-        const disposeTool = ctx.tools.register(tool);
-        ctx.effect(() => () => disposeTool(), `dsh-mloader:${tool.name}`);
-    }
     if (settings.statusTool !== false) {
+        for (const tool of createManagementTools(target)) {
+            const disposeTool = ctx.tools.register(tool);
+            ctx.effect(() => () => disposeTool(), `dsh-mloader:${tool.name}`);
+        }
         const disposeStatusTool = ctx.tools.register(createStatusTool(() => manager.list()));
         ctx.effect(() => () => disposeStatusTool(), 'dsh-mloader:status-tool');
     }

@@ -305,7 +305,7 @@ def apply(ctx):
       },
     )
 
-    const routesReady = await waitFor(() => server.routes.size === 2, 5000)
+    const routesReady = await waitFor(() => server.routes.size === 3, 5000)
     check(
       'the GET list route is registered as an exact route',
       routesReady && server.routes.has('exact /mloader/plugins'),
@@ -587,11 +587,11 @@ def apply(ctx):
     await loaderFiber.dispose()
     const routesGone = await waitFor(() => server.routes.size === 0, 5000)
     check(
-      'both routes are removed with the injected scope',
+      'all routes are removed with the injected scope',
       routesGone,
       JSON.stringify([...server.routes.keys()]),
     )
-    check('both route disposers ran', server.removed.length === 2, JSON.stringify(server.removed))
+    check('all route disposers ran', server.removed.length === 3, JSON.stringify(server.removed))
     const toolsGone = await waitFor(
       () => !tools.schemas().some(
         (schema) => ['py_greet', 'py_echo', 'off_ping', 'crash_now'].includes(schema.name),

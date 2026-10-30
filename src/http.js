@@ -2,10 +2,9 @@
  * Optional HTTP operator surface of the loader.
  *
  * The loader works without a web server. When the harness provides the
- * `webServer` service, this module registers two exact routes: one that lists
- * the hosted plugins and one that switches a single plugin on or off at runtime.
- * They are the transport behind the browser half of dsh-mloader, which renders
- * the Plugins page section. They are not part of the external plugin contract.
+ * `webServer` service, this module registers routes that list hosted plugins,
+ * switch a plugin at runtime and edit the loader's profile configuration. These
+ * routes serve the browser half and are not part of the external plugin contract.
  *
  * The routes are registered inside the injected scope, so they appear when the
  * web server appears and are removed when the loader or the web server unloads.
@@ -14,10 +13,13 @@
  *
  * @module http
  */
+import { ConfigConflictError, ConfigUnavailableError, ConfigValidationError, readLoaderConfig, writeLoaderConfig } from './config-editor.js';
 /** Path that lists every hosted plugin. */
 export const PLUGINS_PATH = '/mloader/plugins';
 /** Path that switches one hosted plugin on or off. */
 export const TOGGLE_PATH = '/mloader/plugins/toggle';
+/** Path that reads and edits the loader's profile configuration. */
+export const CONFIG_PATH = '/mloader/config';
 /** Largest accepted request body, in bytes. */
 export const MAX_BODY_BYTES = 64 * 1024;
 /**
@@ -64,7 +66,7 @@ export function registerMloaderHttp(ctx, target, logger) {
                 logger?.warn?.('dsh-mloader: webServer service has no register method; HTTP routes were not registered');
                 return;
             }
-            const dispose = registerRoutes(server, target, logger);
+            const dispose = registerRoutes(server, target, ctx, logger);
             scope.effect(() => () => dispose(), 'dsh-mloader:http');
         }
         catch (error) {
@@ -73,28 +75,40 @@ export function registerMloaderHttp(ctx, target, logger) {
     });
 }
 /**
- * Register both routes on the web server.
+ * Register the operator routes on the web server.
  *
  * @param server - The harness web server service.
  * @param target - Plugin management operations behind the routes.
+ * @param ctx - Loader context used to resolve the profile configuration editor.
  * @param logger - Loader logger, or undefined.
- * @returns One disposer that removes both routes.
+ * @returns One disposer that removes the routes.
  */
-function registerRoutes(server, target, logger) {
-    const disposeList = server.register({
-        kind: 'exact',
-        path: PLUGINS_PATH,
-        handler: guarded((req, res) => handleList(target, req, res), logger),
-    });
-    const disposeToggle = server.register({
-        kind: 'exact',
-        path: TOGGLE_PATH,
-        handler: guarded((req, res) => handleToggle(target, req, res, logger), logger),
-    });
-    return () => {
-        safeDispose(disposeList);
-        safeDispose(disposeToggle);
-    };
+function registerRoutes(server, target, ctx, logger) {
+    const disposers = [];
+    try {
+        disposers.push(server.register({
+            kind: 'exact',
+            path: PLUGINS_PATH,
+            handler: guarded((req, res) => handleList(target, req, res), logger),
+        }));
+        disposers.push(server.register({
+            kind: 'exact',
+            path: TOGGLE_PATH,
+            handler: guarded((req, res) => handleToggle(target, req, res, logger), logger),
+        }));
+        disposers.push(server.register({
+            kind: 'exact',
+            path: CONFIG_PATH,
+            handler: guarded((req, res) => handleConfig(ctx, req, res), logger),
+        }));
+    }
+    catch (error) {
+        for (const dispose of disposers)
+            safeDispose(dispose);
+        throw error;
+    }
+    return () => { for (const dispose of disposers)
+        safeDispose(dispose); };
 }
 /**
  * Wrap one route handler so no failure escapes into the web server.
@@ -196,6 +210,38 @@ async function handleToggle(target, req, res, logger) {
         logger?.warn?.(`dsh-mloader: toggling plugin ${id} failed: ${messageOf(error)}`);
         const plugin = target.list().find((entry) => entry.id === id) ?? null;
         sendJson(res, 500, { error: messageOf(error), plugin });
+    }
+}
+/** Answer a read or revision-checked write of the loader configuration. */
+async function handleConfig(ctx, req, res) {
+    const method = methodOf(req);
+    if (method !== 'GET' && method !== 'POST') {
+        sendJson(res, 405, { error: `method ${method === '' ? 'unknown' : method} is not allowed` });
+        return;
+    }
+    try {
+        if (method === 'GET') {
+            sendJson(res, 200, readLoaderConfig(ctx));
+            return;
+        }
+        const body = await readJsonBody(req);
+        if (!isRecord(body))
+            throw new ConfigValidationError('request body must be an object');
+        await writeLoaderConfig(ctx, body.revision, body.changes);
+        sendJson(res, 200, { saved: true });
+    }
+    catch (error) {
+        if (error instanceof BodyTooLargeError)
+            sendJson(res, 413, { error: error.message });
+        else if (error instanceof ConfigConflictError)
+            sendJson(res, 409, { error: error.message });
+        else if (error instanceof ConfigUnavailableError)
+            sendJson(res, 503, { error: error.message });
+        else if (error instanceof ConfigValidationError || error instanceof SyntaxError) {
+            sendJson(res, 400, { error: error.message });
+        }
+        else
+            throw error;
     }
 }
 /** Read the request method in upper case, or an empty string when absent. */

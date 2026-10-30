@@ -438,7 +438,7 @@ profile 目录从 `ctx.baseUrl` 探测，dsh 把它设为包含活动 `cordis.ym
 dsh-mloader 为运行 dsh 的人提供三个操作界面：
 
 - dsh 插件页面上的 External plugins 区块，列出被托管的插件并在运行时开关它们；
-- `/mloader` 下的两个 HTTP 路由，向浏览器半边提供插件列表和运行时开关；
+- `/mloader` 下的 HTTP 路由，向浏览器半边提供插件列表、运行时开关和加载器配置；
 - `/mloader` 斜杠命令组。
 
 它们属于 dsh-mloader 内部，不是外部插件 ABI 的一部分。外部插件不能调用它们，不能在它们上面注册，也不能依赖它们的请求或响应形状。浏览器区块和 HTTP 路由只在 web profile 存在；非 web 的 dsh profile 会挂载加载器并托管插件，但没有它们；斜杠命令只在可选的 commands 服务可用时存在。

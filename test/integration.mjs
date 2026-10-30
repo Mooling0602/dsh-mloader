@@ -170,6 +170,20 @@ async function main() {
   check('every external tool is revoked', !finalNames.some((n) => n.startsWith('py_')), `leftover: ${finalNames.join(',')}`)
   check('management tools are revoked', managementNames.every((name) => !finalNames.includes(name)), finalNames.join(','))
 
+  section('10. Disable model-facing management tools')
+  const disabledFiber = root.plugin(
+    { name: 'dsh-mloader', inject: ['tools'], apply: loaderApply },
+    { roots: [new URL('./plugins', import.meta.url).pathname], profilePlugins: false,
+      seedExamples: false, console: false, pythonBin: 'python3', statusTool: false, watch: false },
+  )
+  await new Promise((resolve) => setTimeout(resolve, 2500))
+  const disabledNames = tools.schemas().map((schema) => schema.name)
+  check('status and management tools are not registered',
+    ['mloader_status', ...managementNames].every((name) => !disabledNames.includes(name)), disabledNames.join(','))
+  check('external plugin tools remain registered', disabledNames.includes('py_greet'))
+  check('the management service remains available', typeof root.get('mloader')?.list === 'function')
+  await disabledFiber.dispose()
+
   // Summary
   console.log('')
   if (failures.length === 0) {

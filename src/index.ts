@@ -78,7 +78,7 @@ interface LoaderConfig {
   shellPath?: string[]
   /** Keep the `__pycache__` directory a Python plugin writes when it loads. Defaults to false. */
   enablePyc?: boolean
-  /** Register the `mloader_status` tool. Defaults to true. */
+  /** Register the model-facing plugin management tools. Defaults to true. */
   statusTool?: boolean
   /** Register the `/mloader` command, optionally with a custom name. Defaults to true. */
   command?: boolean | string
@@ -878,12 +878,11 @@ export async function apply(ctx: LoaderContext, config: LoaderConfig = {}): Prom
     disable: (id: string) => manager.disable(id),
     reload: (id: string) => manager.reload(id),
   }
-  for (const tool of createManagementTools(target)) {
-    const disposeTool = ctx.tools.register(tool)
-    ctx.effect(() => () => disposeTool(), `dsh-mloader:${tool.name}`)
-  }
-
   if (settings.statusTool !== false) {
+    for (const tool of createManagementTools(target)) {
+      const disposeTool = ctx.tools.register(tool)
+      ctx.effect(() => () => disposeTool(), `dsh-mloader:${tool.name}`)
+    }
     const disposeStatusTool = ctx.tools.register(createStatusTool(() => manager.list()))
     ctx.effect(() => () => disposeStatusTool(), 'dsh-mloader:status-tool')
   }

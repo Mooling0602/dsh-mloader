@@ -82,7 +82,9 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 
 ## 配置
 
-默认值就是可用的。想改某一项时，在 profile 的 `cordis.patch.yml` 里指定 `dsh-mloader` 这个 id，然后重启 dsh：
+默认值就是可用的。在网页版插件页打开 dsh-mloader 组合包，即可编辑并保存加载器设置。保存使用当前 profile 的配置编辑器，可能重新加载加载器；编辑器会将当前完整的加载器配置写为 profile 覆盖项。若启用了内置示例刷新，重新加载会覆盖示例目录中的本地修改。
+
+也可以在 profile 的 `cordis.patch.yml` 里指定 `dsh-mloader` 这个 id：
 
 ```yaml
 - id: dsh-mloader
@@ -101,7 +103,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | `pythonBin` | `python3` | 用来创建共享环境的基础 Python 解释器。Python 插件在该环境中运行。 |
 | `shellPath` | `[]` | 添加到 Python 环境准备过程及插件 PATH 前面的目录列表。请使用绝对路径，`~` 不会展开。 |
 | `enablePyc` | `false` | 是否保留 Python 写在插件旁边的字节码缓存。关闭时每次重新加载都执行磁盘上的代码，开启则是用这个保证换取更快的启动。 |
-| `statusTool` | `true` | 是否为模型注册 `mloader_status` 工具。 |
+| `statusTool` | `true` | 是否为模型注册插件状态和管理工具。 |
 | `command` | `true` | `/mloader` 命令：`true` 用默认名，字符串为自定义名，`false` 关闭。 |
 | `seedExamples` | `true` | 每次启动时是否把随包示例释放并刷新到 profile 里。 |
 | `console` | `true` | 终端输出：`true` 只打印生命周期行，`'verbose'` 连扫描细节一起打印，`false` 静默。 |

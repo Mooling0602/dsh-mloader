@@ -33,6 +33,8 @@ const NS = 'mloader';
 const PLUGINS_URL = '/mloader/plugins';
 /** Route the host half serves a runtime switch request from. */
 const TOGGLE_URL = '/mloader/plugins/toggle';
+/** Route for editing the loader's profile configuration. */
+const CONFIG_URL = '/mloader/config';
 /** Package name of the bundle this entry is registered for, which is its slot key. */
 const BUNDLE_NAME = 'dsh-mloader';
 /** Dictionary key of each lifecycle state the host can report. */
@@ -75,6 +77,24 @@ const DICTIONARIES = {
         stateFailed: '异常',
         stateDiscovered: '未运行',
         stateDisposed: '已移除',
+        configTitle: '加载器配置', configLoading: '正在读取配置…', configError: '配置读取失败',
+        configSave: '保存配置', configSaving: '正在保存…', configSaved: '配置已保存。',
+        configSaveError: '保存结果未确认，请重新打开页面检查配置', configConflict: '配置已变更，请重新读取后再保存',
+        configReload: '重新读取', configHint: '保存会将当前完整配置写入 profile 并可能重新加载插件。每行填写一个路径，请使用绝对路径。',
+        configSeedWarning: '重新加载时，如果启用了示例插件刷新，示例目录中的本地修改会被覆盖。',
+        roots: '额外插件根目录', profilePlugins: '扫描 profile 插件目录', autoEnable: '启动时加载插件',
+        pythonBin: 'Python 解释器', shellPath: '额外 PATH 目录', enablePyc: '保留 Python 字节码缓存',
+        statusTool: '启用插件管理工具', command: '命令名称（true、false 或名称）', seedExamples: '刷新内置示例',
+        console: '终端日志', consoleOn: '开启', consoleOff: '关闭', consoleVerbose: '详细',
+        watch: '监听插件目录', wasmEnabled: '启用 WebAssembly 后端',
+        configReadOnly: '此配置当前不可写。', configOverridden: '已覆盖', configReset: '恢复默认',
+        rootsHint: '除 profile 之外扫描的目录，每行一个。', shellPathHint: 'Python 子进程额外搜索的目录，每行一个。',
+        profilePluginsHint: '扫描当前 profile 的外部插件目录。', autoEnableHint: '启动加载器时自动挂载已启用的插件。',
+        pythonBinHint: '用于创建共享 Python 环境的解释器。', pythonBinInvalid: '请输入解释器名称或路径。',
+        enablePycHint: '保留字节码缓存可能让重新加载使用旧代码。', statusToolHint: '向模型提供插件状态、查看、加载、卸载和重载工具。',
+        commandHint: 'true 使用默认名称；false 禁用；也可以输入自定义名称。', commandInvalid: '请输入 true、false 或有效的命令名称。',
+        seedExamplesHint: '加载器启动时刷新内置示例，会替换示例目录。', consoleHint: '选择终端中的加载器日志级别。',
+        watchHint: '自动发现新增或删除的插件目录。', wasmEnabledHint: '允许加载 WebAssembly 插件。',
     },
     en: {
         title: 'External plugins',
@@ -96,6 +116,25 @@ const DICTIONARIES = {
         stateFailed: 'Problem',
         stateDiscovered: 'Not running',
         stateDisposed: 'Removed',
+        configTitle: 'Loader configuration', configLoading: 'Loading configuration…', configError: 'Could not read configuration',
+        configSave: 'Save configuration', configSaving: 'Saving…', configSaved: 'Configuration saved.',
+        configSaveError: 'Save result could not be confirmed. Reopen the page and check the configuration',
+        configConflict: 'Configuration changed. Reload it before saving', configReload: 'Reload configuration',
+        configHint: 'Saving writes the current complete configuration to the profile and may reload this plugin. Enter one absolute path per line.',
+        configSeedWarning: 'If bundled example refresh is enabled, reloading replaces local changes in the example directory.',
+        roots: 'Additional plugin roots', profilePlugins: 'Scan the profile plugin directory', autoEnable: 'Load plugins at startup',
+        pythonBin: 'Python interpreter', shellPath: 'Additional PATH directories', enablePyc: 'Keep Python bytecode caches',
+        statusTool: 'Enable plugin management tools', command: 'Command name (true, false or a name)', seedExamples: 'Refresh bundled example',
+        console: 'Terminal logging', consoleOn: 'On', consoleOff: 'Off', consoleVerbose: 'Verbose',
+        watch: 'Watch plugin directories', wasmEnabled: 'Enable the WebAssembly backend',
+        configReadOnly: 'This configuration is read-only.', configOverridden: 'Overridden', configReset: 'Reset to default',
+        rootsHint: 'Directories scanned in addition to the profile, one per line.', shellPathHint: 'Additional executable search directories for Python children, one per line.',
+        profilePluginsHint: 'Scan the current profile’s external plugin directory.', autoEnableHint: 'Mount enabled plugins when the loader starts.',
+        pythonBinHint: 'The interpreter used to create the shared Python environment.', pythonBinInvalid: 'Enter an interpreter name or path.',
+        enablePycHint: 'A bytecode cache can cause a reload to use old code.', statusToolHint: 'Expose plugin status, inspection, load, unload and reload tools to the model.',
+        commandHint: 'Use true for the default name, false to disable it, or enter a custom name.', commandInvalid: 'Enter true, false or a valid command name.',
+        seedExamplesHint: 'Refresh the bundled example at startup, replacing its directory.', consoleHint: 'Choose the loader’s terminal logging level.',
+        watchHint: 'Discover added and removed plugin directories automatically.', wasmEnabledHint: 'Allow WebAssembly plugins to load.',
     },
 };
 /** Inline style of the whole section: the page's own configuration column item. */
@@ -275,6 +314,46 @@ function readError(body) {
     const error = body?.error;
     return typeof error === 'string' ? error : '';
 }
+/** Turn a host configuration into the form's text and switch values. */
+function toConfigDraft(value) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value))
+        return null;
+    const config = value;
+    if (!Array.isArray(config.roots) || !config.roots.every((item) => typeof item === 'string') ||
+        !Array.isArray(config.shellPath) || !config.shellPath.every((item) => typeof item === 'string') ||
+        typeof config.pythonBin !== 'string' ||
+        (typeof config.command !== 'boolean' && typeof config.command !== 'string') ||
+        (config.console !== true && config.console !== false && config.console !== 'verbose'))
+        return null;
+    const bools = ['profilePlugins', 'autoEnable', 'enablePyc', 'statusTool', 'seedExamples', 'watch', 'wasmEnabled'];
+    if (bools.some((key) => typeof config[key] !== 'boolean'))
+        return null;
+    return {
+        roots: config.roots.join('\n'), shellPath: config.shellPath.join('\n'), pythonBin: config.pythonBin,
+        profilePlugins: config.profilePlugins, autoEnable: config.autoEnable,
+        enablePyc: config.enablePyc, statusTool: config.statusTool,
+        command: String(config.command), seedExamples: config.seedExamples,
+        console: String(config.console), watch: config.watch, wasmEnabled: config.wasmEnabled,
+    };
+}
+/** Project changed draft fields onto the host's configuration edit. */
+function configChanges(draft, baseline) {
+    const result = {};
+    for (const key of Object.keys(draft)) {
+        if (draft[key] === baseline[key])
+            continue;
+        const value = draft[key];
+        if (key === 'roots' || key === 'shellPath') {
+            result[key] = value.split('\n').map((line) => line.trim()).filter(Boolean);
+        }
+        else if (key === 'command' || key === 'console') {
+            result[key] = value === 'true' ? true : value === 'false' ? false : value;
+        }
+        else
+            result[key] = value;
+    }
+    return result;
+}
 /** Message of a failed HTTP response. */
 function httpError(body, status) {
     const message = readError(body);
@@ -296,6 +375,145 @@ function createClientCore(deps) {
     function stateLabel(t, state) {
         const key = STATE_KEYS[state];
         return key === undefined ? state : t(key);
+    }
+    /** Edit profile-owned loader configuration through the host configuration editor. */
+    function LoaderConfigSection(props) {
+        const t = props.t ?? boundTranslate;
+        const [draft, setDraft] = react.useState(null);
+        const [baseline, setBaseline] = react.useState(null);
+        const [revision, setRevision] = react.useState('');
+        const [status, setStatus] = react.useState('loading');
+        const [message, setMessage] = react.useState('');
+        const [attempt, setAttempt] = react.useState(0);
+        react.useEffect(() => {
+            let alive = true;
+            const load = async () => {
+                setStatus('loading');
+                setMessage('');
+                try {
+                    const response = await fetch(CONFIG_URL, { credentials: 'same-origin' });
+                    const body = await readJson(response);
+                    if (!response.ok)
+                        throw new Error(httpError(body, response.status));
+                    const next = toConfigDraft(body?.config);
+                    if (next === null || typeof body?.revision !== 'string')
+                        throw new Error('invalid configuration response');
+                    if (!alive)
+                        return;
+                    setDraft(next);
+                    setBaseline(next);
+                    setRevision(body.revision);
+                    setStatus('ready');
+                }
+                catch (error) {
+                    if (!alive)
+                        return;
+                    setMessage(messageOf(error));
+                    setStatus('error');
+                }
+            };
+            void load();
+            return () => { alive = false; };
+        }, [attempt]);
+        const update = (key, value) => {
+            setDraft((previous) => previous === null ? null : { ...previous, [key]: value });
+        };
+        const save = () => {
+            if (draft === null || baseline === null || status !== 'ready')
+                return;
+            const changes = configChanges(draft, baseline);
+            if (Object.keys(changes).length === 0)
+                return;
+            setStatus('saving');
+            setMessage('');
+            const request = async () => {
+                try {
+                    const response = await fetch(CONFIG_URL, {
+                        method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ revision, changes }),
+                    });
+                    const body = await readJson(response);
+                    if (!response.ok) {
+                        if (response.status === 409)
+                            throw new Error(t('configConflict'));
+                        throw new Error(httpError(body, response.status));
+                    }
+                    if (body?.saved !== true)
+                        throw new Error('invalid save response');
+                    const updated = await fetch(CONFIG_URL, { credentials: 'same-origin' });
+                    const updatedBody = await readJson(updated);
+                    if (!updated.ok)
+                        throw new Error(httpError(updatedBody, updated.status));
+                    const next = toConfigDraft(updatedBody?.config);
+                    if (next === null || typeof updatedBody?.revision !== 'string')
+                        throw new Error('invalid configuration response');
+                    setDraft(next);
+                    setBaseline(next);
+                    setRevision(updatedBody.revision);
+                    setMessage(t('configSaved'));
+                    setStatus('ready');
+                }
+                catch (error) {
+                    setMessage(`${t('configSaveError')}: ${messageOf(error)}`);
+                    setStatus('ready');
+                }
+            };
+            void request();
+        };
+        if (status === 'loading')
+            return react.createElement('p', { style: STATUS_STYLE }, t('configLoading'));
+        if (draft === null || baseline === null || status === 'error') {
+            return react.createElement('section', { 'data-mloader': 'configuration', style: SECTION_STYLE }, react.createElement('p', { role: 'alert', style: ERROR_STYLE }, `${t('configError')}: ${message}`), react.createElement(primitives.Button, {
+                variant: 'outline', size: 'sm', onClick: () => setAttempt((value) => value + 1),
+            }, t('configReload')));
+        }
+        const dirty = Object.keys(configChanges(draft, baseline)).length > 0;
+        const pythonInvalid = draft.pythonBin.trim() === '';
+        const commandInvalid = draft.command !== 'true' && draft.command !== 'false' && !/^[a-z][a-z0-9_-]*$/u.test(draft.command);
+        const state = { available: true, writable: true, dirty, invalid: pythonInvalid || commandInvalid, saving: status === 'saving', failed: false };
+        const fieldStyle = { display: 'grid', gap: '6px', padding: '12px 0', fontSize: '13px', lineHeight: '1.5' };
+        const inputStyle = {
+            boxSizing: 'border-box', width: '100%', padding: '8px 10px', color: 'var(--dsw-alias-label-primary, inherit)',
+            background: 'var(--dsw-alias-bg-layer-3, transparent)', font: 'inherit',
+            border: '0.5px solid var(--dsw-alias-border-l3, #888)', borderRadius: 'var(--dsw-radius-md, 8px)',
+        };
+        const textField = (key, invalid) => react.createElement(primitives.SettingsValueField, {
+            key, id: `mloader-config-${key}`, label: t(key), hint: t(`${key}Hint`), text: draft[key],
+            invalid, overridden: false, overriddenLabel: t('configOverridden'), resetLabel: t('configReset'),
+            invalidLabel: t(`${key}Invalid`), disabled: status === 'saving',
+            onEdit: (value) => update(key, value), onReset: () => update(key, baseline[key]),
+        });
+        const pathField = (key) => react.createElement('label', { key, style: fieldStyle }, react.createElement('span', null, t(key)), react.createElement('textarea', {
+            value: draft[key], rows: 3, style: inputStyle, disabled: status === 'saving',
+            onChange: (event) => update(key, event.target.value),
+        }), react.createElement('span', { style: STATUS_STYLE }, t(`${key}Hint`)));
+        const toggleField = (key) => react.createElement('div', { key, style: { ...fieldStyle, borderBottom: '0.5px solid var(--dsw-alias-border-l3, rgba(128,128,128,.25))' } }, react.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' } }, react.createElement('span', null, t(key)), react.createElement(primitives.Switch, {
+            checked: draft[key], label: t(key), disabled: status === 'saving',
+            onChange: (checked) => update(key, checked),
+        })), react.createElement('p', { style: STATUS_STYLE }, t(`${key}Hint`)));
+        const children = [
+            react.createElement('p', { key: 'hint', style: STATUS_STYLE }, t('configHint')),
+            react.createElement('p', { key: 'warning', style: STATUS_STYLE }, t('configSeedWarning')),
+            pathField('roots'), toggleField('profilePlugins'), toggleField('autoEnable'),
+            textField('pythonBin', pythonInvalid), pathField('shellPath'), toggleField('enablePyc'),
+            toggleField('statusTool'), textField('command', commandInvalid), toggleField('seedExamples'),
+            react.createElement('label', { key: 'console', style: fieldStyle }, t('console'), react.createElement('select', {
+                value: draft.console, style: inputStyle, disabled: status === 'saving',
+                onChange: (event) => update('console', event.target.value),
+            }, react.createElement('option', { value: 'true' }, t('consoleOn')), react.createElement('option', { value: 'false' }, t('consoleOff')), react.createElement('option', { value: 'verbose' }, t('consoleVerbose'))), react.createElement('span', { style: STATUS_STYLE }, t('consoleHint'))),
+            toggleField('watch'), toggleField('wasmEnabled'),
+            ...(message === '' ? [] : [react.createElement('p', {
+                    key: 'message', role: message === t('configSaved') ? 'status' : 'alert',
+                    style: message === t('configSaved') ? STATUS_STYLE : ERROR_STYLE,
+                }, message)]),
+            ...(message === '' || message === t('configSaved') ? [] : [react.createElement(primitives.Button, {
+                    key: 'reload', variant: 'outline', size: 'sm', onClick: () => setAttempt((value) => value + 1),
+                }, t('configReload'))]),
+        ];
+        return react.createElement('section', { 'data-mloader': 'configuration' }, react.createElement(primitives.SettingsForm, {
+            labels: { unavailable: t('configError'), readOnly: t('configReadOnly'), saveFailed: t('configSaveError'), save: t('configSave'), saving: t('configSaving') },
+            state, onSave: save, onDiscard: () => { setDraft({ ...baseline }); setMessage(''); },
+        }, ...children));
     }
     /** The section body, mounted as the dsh-mloader bundle's configuration. */
     function ExternalPluginsSectionBody(props) {
@@ -413,11 +631,11 @@ function createClientCore(deps) {
         else {
             content.push(react.createElement('ul', { key: 'list', style: LIST_STYLE }, plugins.map(renderRow)));
         }
-        return react.createElement('section', { 'data-mloader': 'external-plugins', style: SECTION_STYLE }, react.createElement('div', { style: HEAD_STYLE }, react.createElement('h4', { style: TITLE_STYLE }, t('title')), plugins.length === 0 ? null : react.createElement('span', { style: COUNT_STYLE }, partsSummary(plugins, t))), ...content);
+        return react.createElement('section', { 'data-mloader': 'external-plugins', style: { ...SECTION_STYLE, marginTop: '24px' } }, react.createElement('div', { style: HEAD_STYLE }, react.createElement('h4', { style: TITLE_STYLE }, t('title')), plugins.length === 0 ? null : react.createElement('span', { style: COUNT_STYLE }, partsSummary(plugins, t))), ...content);
     }
     /** The registered entry; the page draws it as the bundle's own configuration. */
     function ExternalPluginsSection(props) {
-        return react.createElement(ExternalPluginsSectionBody, props);
+        return react.createElement('div', null, react.createElement('h4', { style: TITLE_STYLE }, (props.t ?? boundTranslate)('configTitle')), react.createElement(LoaderConfigSection, props), react.createElement(ExternalPluginsSectionBody, props));
     }
     /** Install the dictionaries and the bundle configuration entry. */
     function apply(ctx) {
