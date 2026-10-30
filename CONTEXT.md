@@ -4,7 +4,7 @@ Technical detail for agents and maintainers. This is the place to look for the p
 
 `AGENTS.md` holds coding conventions and development rules only. `README.md` is for ordinary users and stays short. Documentation for third-party plugin authors belongs in `docs/` and stays rigorous.
 
-This file is meant to be loaded whole by an agent that needs the working model of the system in one place. It therefore reproduces a fact that also lives in `docs/ABI.md`, in `AGENTS.md` or in `README.md` whenever the second copy saves the reader another file, and it carries detail those documents leave out because their own audience does not need it. Reproduction here is deliberate and not a defect, so a change updates the copy in this file even when the authoritative statement lives elsewhere. Section 7 records which document owns which material.
+This file is meant to be loaded whole by an agent that needs the working model of the system in one place. It therefore reproduces a fact that also lives in `docs/`, in `AGENTS.md` or in `README.md` whenever the second copy saves the reader another file, and it carries detail those documents leave out because their own audience does not need it. Reproduction here is deliberate and not a defect, so a change updates the copy in this file even when the authoritative statement lives elsewhere. Section 7 records which document owns which material.
 
 ## Contents
 
@@ -21,7 +21,7 @@ This file is meant to be loaded whole by an agent that needs the working model o
 - Hard technical facts live here, not inline in `AGENTS.md` and not in `README.md`.
 - When a change alters behaviour, an invariant, a protocol or a workaround, update this file in the same change. A stale section here is worse than no section.
 - Keep it dense and factual. No marketing, no tutorial tone.
-- A change to the plugin ABI updates [`docs/ABI.md`](docs/ABI.md) first.
+- A change to the plugin ABI updates the owning document under `docs/` first: the shared contract in `docs/ABI-unified.md`, the Python backend contract in `docs/python-sdk/PyABI.md`, the WebAssembly contract in `docs/wasm/WasmABI.md`, the shared package rules in `docs/Package.md`, and the backend package layouts in `docs/python-sdk/Package.md` and `docs/wasm/Package.md`.
 
 ## 2. Architecture axioms
 
@@ -29,11 +29,11 @@ The loader reconciles two facts that do not fit together: dsh loads only Cordis 
 
 1. **The loader is an ordinary Cordis plugin.** dsh mounts it from the profile bundle patch. It does not change the dsh loader, the bundle mechanism or `import()`, and it replaces no existing plugin.
 2. **Hosted external plugins are not Cordis plugins.** They create no Cordis plugin entity, no fiber node and no per-plugin `ctx` scope, and they never appear in a dsh plugin list. They send registration intents over a private RPC protocol; the loader performs the real registrations on its own `ctx`.
-3. **The capability surface is a whitelist, not a passthrough.** Only the four operations listed in `docs/ABI.md` §3 are reachable from a plugin. A new capability is added to the whitelist deliberately and never by exposing a `ctx` object.
+3. **The capability surface is a whitelist, not a passthrough.** Only the four operations listed in `docs/ABI-unified.md` §3 are reachable from a plugin. A new capability is added to the whitelist deliberately and never by exposing a `ctx` object.
 4. **Registrations are owned and revocable.** Every registration a plugin causes is recorded in that plugin's ledger and revoked in reverse order when the plugin unloads. The loader owns the whole lifecycle of its plugins.
 5. **The host main thread is never occupied by external code.** Python runs in a child process, WebAssembly runs in a worker thread, and event dispatch to a plugin is fire-and-forget while the host execution chain advances synchronously.
 6. **`apply()` does not wait for plugin startup.** The loader starts plugin boot in the background and returns, and it watches its Cordis fiber to abort a startup that is still in flight when teardown begins.
-7. **The ABI is versioned.** The RPC protocol has an explicit protocol version, and the manifest schema and the WebAssembly core ABI are normative in `docs/ABI.md`. Wire shapes change only with a protocol version bump.
+7. **The ABI is versioned.** The RPC protocol has an explicit protocol version. The manifest schema is normative in `docs/ABI-unified.md`, and each backend contract is normative in its own document under `docs/`. Wire shapes change only with a protocol version bump.
 
 The cost of axiom 2 is deliberate: an external plugin has no per-plugin `ctx` isolation, cannot use Cordis `inject` to resolve services and does not appear in plugin management. The loader may show a plugin's state on its own operator surfaces, but that does not make the plugin a dsh plugin entry. That cost is the reason the loader can host non-Cordis code at all.
 
@@ -71,8 +71,15 @@ locale/zh.json             Simplified Chinese copy of the same two fields
 tsconfig.client.json       compiler configuration for src/client
 seed/hello-mloader/        bundled example plugin: manifest and plugin.py
 test/                      19 self-contained suites and their fixtures
-docs/ABI.md                normative plugin contract
+docs/ABI-unified.md        shared plugin contract
+docs/Package.md             shared package format and install rules
+docs/python-sdk/PyABI.md   Python backend contract and SDK
+docs/python-sdk/Package.md Python package layout
+docs/wasm/WasmABI.md       WebAssembly core ABI
+docs/wasm/Package.md       WebAssembly package targets and layout
 ```
+
+Each document under `docs/` has a Simplified Chinese counterpart at the same path with a `.zh.md` suffix. Each pair carries a language selector at the top that links to the other.
 
 Top level files: `AGENTS.md` (rules), `CONTEXT.md` (this file), `README.md` and `README.zh.md` (users), `NOTICE` (copyright and license mapping), `LICENSE`, `COPYING` and `COPYING.LESSER` (license texts), `package.json` (package metadata and scripts), `pnpm-lock.yaml`, `tsconfig.json` (host compiler configuration), `tsconfig.client.json` (browser half compiler configuration), `client.js` (generated browser bundle), `locale/` (the title and description the Plugins page renders, per language), `cordis.patch.yml` (default loader configuration), `scripts/` (maintainer build scripts), `.markdownlint.json` (Markdown lint policy) and `.gitignore`. The `.build/` intermediate directory is ignored.
 
@@ -309,7 +316,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 ### 5.1 Data crossing a process or thread boundary
 
 - **Project host objects into pure data before they leave the host.** A `tools/*` event carries a live execution object whose `agent` field contains a reference cycle through `ctx`, fiber and scope, and whose `signal` field is a host `AbortSignal`. `JSON.stringify` throws on the cycle, and `postMessage` throws `DataCloneError` on the signal. `serialize.ts` owns the projection: cycles become `[Circular]`, functions become `[Function]`, an `AbortSignal` becomes `{ $type: 'AbortSignal', aborted, reason? }`, and depth, key count, array length and string length are capped.
-- **Give the tool execution events a dedicated projection.** The first argument of `tools/execute`, `tools/pre-execute`, `tools/post-execute`, `tools/result` and `tools/change` is projected by `projectToolExecution()` into the stable shape documented in `docs/ABI.md` §3.4. Do not hand the plugin the whole agent tree.
+- **Give the tool execution events a dedicated projection.** The first argument of `tools/execute`, `tools/pre-execute`, `tools/post-execute`, `tools/result` and `tools/change` is projected by `projectToolExecution()` into the stable shape documented in `docs/ABI-unified.md` §3.4. Do not hand the plugin the whole agent tree.
 - **A serialization failure may drop one frame and nothing else.** Serialization and the stream write are separate `try` blocks. A frame that cannot be serialized is lost with a warning; it must not mark the channel broken. Only a real write failure marks the channel broken and stops further writes.
 - **A request that was never written fails immediately.** `#request` resolves with a `kind: 'transport'` error when the frame could not be delivered, so the caller does not wait the full call timeout for a reply that cannot arrive.
 
@@ -397,7 +404,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **A tool needs a name, a description and a valid schema.** The name matches `^[A-Za-z0-9_-]{1,64}$`, the description must be non-empty, and a duplicate tool name or a duplicate event subscription within one plugin is rejected.
 - **The loader pre-validates the JSON Schema subset.** dsh accepts only a restricted subset, and its own error names the keyword without naming the plugin or tool. The loader validates first and reports the plugin id, tool name and offending path. `format`, `minimum`, `pattern`, `$ref`, `anyOf`, `allOf` and similar keywords are rejected.
 - **`output.render` is rebuilt on the host side.** Functions cannot cross the plugin boundary, so the plugin declares `output.schema` and the loader supplies a renderer that turns the returned JSON value into a text block.
-- **The Python runtime infers `output` from the return annotation.** The host validates a result against the declared schema and the default schema describes an object, so a handler returning a bare string or number would fail after it ran. Both registration styles call `_output_schema_from_annotation`, which reads the annotation once at registration and sends no `output` when the annotation is absent, is `Any`, fails to resolve, or names no expressible type. An explicit `output` argument wins. The mapping table lives in `docs/ABI.md` §2.8.
+- **The Python runtime infers `output` from the return annotation.** The host validates a result against the declared schema and the default schema describes an object, so a handler returning a bare string or number would fail after it ran. Both registration styles call `_output_schema_from_annotation`, which reads the annotation once at registration and sends no `output` when the annotation is absent, is `Any`, fails to resolve, or names no expressible type. An explicit `output` argument wins. The mapping table lives in `docs/python-sdk/PyABI.md` §4.
 - **Unknown operations and events are rejected by name.** The rejection lists the whitelist so a plugin author can see what is allowed.
 - **Every registration goes through the ledger.** The ledger is the only path to a host registration. It revokes in reverse order, a registration that races ledger closure is revoked immediately instead of hanging around, and one failing disposer must not stop the remaining ones.
 
@@ -439,12 +446,12 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 
 - **The plugin is not a Cordis plugin.** It has no `ctx` beyond the four namespaces, no service injection and no place in plugin management. The loader hosts it and the harness never sees it, so a plugin cannot register a service, cannot inject one, cannot add a plugin entry to the host and cannot observe the loader's own lifecycle.
 - **Only four capabilities exist:** tool registration, event subscription, one-way logging and cleanup registration. Slash commands are not available to external plugins, and neither is anything on the host context that the four namespaces do not expose.
-- **Only the event whitelist can be subscribed.** The list is in `docs/ABI.md` §3.3. Subscribing to a name outside it fails the registration rather than registering a listener that never fires.
-- **Tool parameters use the restricted JSON Schema subset.** Unsupported keywords make registration fail. The subset and its validation rules are in `docs/ABI.md` §2 and are enforced in `src/contract.ts`.
+- **Only the event whitelist can be subscribed.** The list is in `docs/ABI-unified.md` §3.3. Subscribing to a name outside it fails the registration rather than registering a listener that never fires.
+- **Tool parameters use the restricted JSON Schema subset.** Unsupported keywords make registration fail. The subset and its validation rules are in `docs/ABI-unified.md` §3.5 and are enforced in `src/contract.ts`.
 - **An event handler must return immediately and must not wait for the host.** Logging is the only host call that is safe from inside a handler. The host dispatches with a timeout, so a handler that blocks is a handler that gets cut off.
 - **`stdout` belongs to the protocol.** Use `ctx.logger` or `stderr` for diagnostics. A stray write to `stdout` corrupts a frame and is read as a protocol error rather than as output.
 - **Tool results must be JSON serializable.** A raised exception becomes a tool error and leaves the process alive. A result the projection cannot represent is rejected at the call, again without killing the child.
-- **A WebAssembly plugin exports the five core symbols** and must not depend on host imports beyond what `docs/ABI.md` §7 declares. The WebAssembly backend stays off unless `wasm.enabled` is turned on.
+- **A WebAssembly plugin exports the five core symbols** and must not depend on host imports beyond what `docs/wasm/WasmABI.md` section 1 declares. The WebAssembly backend stays off unless `wasm.enabled` is turned on.
 - **Operator surfaces are not plugin capabilities.** The Plugins-page switches, the two HTTP routes and the `/mloader` command belong to dsh-mloader; an external plugin cannot call or rely on them. They may also change without notice, because they are not part of the ABI.
 - **Plugins are independent works.** The loader license does not apply to them, and the loader places no requirement on how a plugin is licensed.
 
@@ -458,3 +465,5 @@ See section 4 of `AGENTS.md` for the rule that governs where documentation goes.
 | `docs/` | third-party plugin authors | precise, normative, ABI-grade |
 | `AGENTS.md` | AI coding agents and maintainers | rules only |
 | `CONTEXT.md` | agents and maintainers | dense technical detail |
+
+Within `docs/`, `ABI-unified.md` owns the shared contract, `Package.md` owns the shared package format, `python-sdk/PyABI.md` and `wasm/WasmABI.md` own the backend contracts, and `python-sdk/Package.md` and `wasm/Package.md` own the backend package layouts.

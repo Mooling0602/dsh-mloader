@@ -51,7 +51,7 @@ dsh plugin --profile web remove dsh-mloader
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
-插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见 [CONTEXT.md](CONTEXT.md)。监听默认开启，关掉的方法见[配置](#配置)，关掉之后新增插件需要重启 dsh。
+插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见 [CONTEXT](CONTEXT.md)。监听默认开启，关掉的方法见[配置](#配置)，关掉之后新增插件需要重启 dsh。
 
 ## 查看与切换插件
 
@@ -93,12 +93,17 @@ dsh plugin --profile web remove dsh-mloader
 | `watch` | `true` | dsh 运行期间新增或删除的插件目录是否免重启自动挂载和卸载。 |
 | `wasm.enabled` | `false` | 是否启用 WebAssembly 后端。 |
 
-每项取值的格式、字节码缓存的取舍和重启验收清单见 [CONTEXT.md](CONTEXT.md)。
+每项取值的格式、字节码缓存的取舍和重启验收清单见 [CONTEXT](CONTEXT.md)。
 
 ## 文档
 
-- [docs/ABI.md](docs/ABI.md)：面向第三方插件作者的规范契约，包括清单格式、Python SDK 的导入方式、能力白名单、RPC 协议、生命周期、后端接口和 WebAssembly ABI。
-- [CONTEXT.md](CONTEXT.md)：面向维护者的技术细节，包括构建与产物策略、配置默认值、测试方法和重启验收清单。
+- [docs/ABI-unified](docs/ABI-unified.zh.md)：面向第三方插件作者的共享契约，包括清单格式、能力白名单、RPC 协议、生命周期、后端接口、安全模型和安装布局。
+- [docs/python-sdk/PyABI](docs/python-sdk/PyABI.zh.md)：Python 后端契约，包括 SDK 导入方式、两种注册风格、结果 schema 推断和进程传输。
+- [docs/wasm/WasmABI](docs/wasm/WasmABI.zh.md)：WebAssembly 核心 ABI，包括必需导出、声明对象和 worker 超时。
+- [docs/Package](docs/Package.zh.md)：两种后端共用的归档格式与安装规则，目标契约。
+- [docs/python-sdk/Package](docs/python-sdk/Package.zh.md)：Python 插件包布局，目标契约。
+- [docs/wasm/Package](docs/wasm/Package.zh.md)：WebAssembly 插件包的目标元数据与目录布局，目标契约。
+- [CONTEXT](CONTEXT.md)：面向维护者的技术细节，包括构建与产物策略、配置默认值、测试方法和重启验收清单。
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk)：Python SDK 包，是 `src/runtime/python_sdk/` 的镜像，带打包元数据和测试。
 
 ## 许可证

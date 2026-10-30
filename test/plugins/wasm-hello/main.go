@@ -1,7 +1,7 @@
 // Command wasmhello is an example WebAssembly plugin written in Go and compiled
 // for wasip1.
 //
-// The ABI is specified in docs/ABI.md §7: the host exchanges JSON through
+// The ABI is specified in docs/wasm/WasmABI.md: the host exchanges JSON through
 // dsh_alloc, dsh_call and dsh_result_ptr. This file depends only on the Go
 // standard library.
 package main

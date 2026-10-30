@@ -7,7 +7,8 @@
  * boundary is the isolation boundary: plugin code never runs on the host main
  * thread.
  *
- * The wire contract is protocol version 1, specified in `docs/ABI.md` §4.
+ * The wire contract is protocol version 1, specified in `docs/ABI-unified.md`
+ * section 4 and `docs/python-sdk/PyABI.md` section 6.
  *
  * @module backends/python
  */

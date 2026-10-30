@@ -8,7 +8,7 @@
  * The instance therefore runs in a `worker_threads` worker, and the host
  * terminates that worker when a call exceeds its deadline.
  *
- * The ABI is the core WebAssembly ABI specified in `docs/ABI.md` §7.
+ * The ABI is the core WebAssembly ABI specified in `docs/wasm/WasmABI.md`.
  *
  * @module backends/wasm
  */

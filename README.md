@@ -51,7 +51,7 @@ Each plugin lives in its own directory under the profile:
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
-A plugin directory contains a `mloader.plugin.json` manifest and its entry file. Copy the directory in while dsh runs: the loader watches the plugin roots, so a directory that appears is mounted and one that is deleted is unmounted, both without a restart. After editing the files of an installed plugin, run `/mloader reload <plugin-id>`. The loader finds the current profile through dsh, so no path configuration is needed. Python plugins need Python 3.10 or later. The WASM backend is disabled by default; see [CONTEXT.md](CONTEXT.md) to enable it. Watching is on by default; see [Configuration](#configuration) to turn it off, and a plugin added to the directory then needs a restart.
+A plugin directory contains a `mloader.plugin.json` manifest and its entry file. Copy the directory in while dsh runs: the loader watches the plugin roots, so a directory that appears is mounted and one that is deleted is unmounted, both without a restart. After editing the files of an installed plugin, run `/mloader reload <plugin-id>`. The loader finds the current profile through dsh, so no path configuration is needed. Python plugins need Python 3.10 or later. The WASM backend is disabled by default; see [CONTEXT](CONTEXT.md) to enable it. Watching is on by default; see [Configuration](#configuration) to turn it off, and a plugin added to the directory then needs a restart.
 
 ## Inspect and switch plugins
 
@@ -93,12 +93,17 @@ Every key is optional. The default column is what dsh-mloader uses when you leav
 | `watch` | `true` | Whether plugin directories added or removed while dsh runs are mounted or unmounted without a restart. |
 | `wasm.enabled` | `false` | Whether the WebAssembly backend is enabled. |
 
-The shape of each value, the bytecode cache trade-off and the restart checklist are in [CONTEXT.md](CONTEXT.md).
+The shape of each value, the bytecode cache trade-off and the restart checklist are in [CONTEXT](CONTEXT.md).
 
 ## Documentation
 
-- [docs/ABI.md](docs/ABI.md): the normative contract for third-party plugin authors, including the manifest schema, the Python SDK import, the capability whitelist, the RPC protocol, the lifecycle, the backend interface and the WebAssembly ABI.
-- [CONTEXT.md](CONTEXT.md): technical detail for maintainers, including the build and artifact policy, configuration defaults, test recipes and the restart checklist.
+- [docs/ABI-unified](docs/ABI-unified.md): the shared contract for third-party plugin authors, including the manifest schema, the capability whitelist, the RPC protocol, the lifecycle, the backend interface, the security model and the installation layout.
+- [docs/python-sdk/PyABI](docs/python-sdk/PyABI.md): the Python backend contract, including the SDK import, the two registration styles, result schema inference and the process transport.
+- [docs/wasm/WasmABI](docs/wasm/WasmABI.md): the WebAssembly core ABI, including the required exports, the declaration object and the worker deadlines.
+- [docs/Package](docs/Package.md): the archive format and installation rules shared by both backends, specified as a target contract.
+- [docs/python-sdk/Package](docs/python-sdk/Package.md): the Python package layout, specified as a target contract.
+- [docs/wasm/Package](docs/wasm/Package.md): the WebAssembly package targets and directory layout, specified as a target contract.
+- [CONTEXT](CONTEXT.md): technical detail for maintainers, including the build and artifact policy, configuration defaults, test recipes and the restart checklist.
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk): the Python SDK package, a mirror of `src/runtime/python_sdk/` with the packaging metadata and tests.
 
 ## License

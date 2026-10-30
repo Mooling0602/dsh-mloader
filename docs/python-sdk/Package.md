@@ -1,8 +1,12 @@
-# Python Package Format
+# dsh-mloader Python package format
 
-This document specifies how a dsh-mloader Python plugin is packaged. It covers what a package contains, the archive formats a package may use, and how the loader installs, updates and removes one. The WebAssembly backend is out of scope: a WebAssembly plugin is a directory, not an archive.
+English | [简体中文](Package.zh.md)
 
-A Python plugin package is a zip archive. The archive holds one plugin manifest and the Python code that manifest names. The loader extracts the archive before it loads anything, so the archive is a transport format and never the directory the plugin runs from. The manifest decides the entry point, which means the archive layout and the manifest cannot disagree.
+This document specifies the layout of a dsh-mloader Python plugin package. The archive container, extraction safety, install index, updates, removal, version compatibility and the shared limits are specified in [Package](../Package.md). This document adds the Python-specific layout and build rules.
+
+Status: target contract. The loader does not install a plugin from an archive; a plugin is a directory under a plugin root. The shared archive rules and this layout are fixed before the implementation lands.
+
+A Python package holds one manifest and the Python code that manifest names. The manifest sets `"backend": "python"` and names the entry file with `entry`. The loader extracts the archive before it loads anything, so the archive is a transport format and never the directory the plugin runs from.
 
 ## 1. Package contents
 
@@ -10,7 +14,7 @@ A package holds these entries at the archive root:
 
 | Entry | Required | Meaning |
 | --- | --- | --- |
-| `mloader.plugin.json` | yes | The plugin manifest, specified in [`../ABI-unified.md`](../ABI-unified.md) section 2.1. |
+| `mloader.plugin.json` | yes | The plugin manifest, specified in [ABI-unified](../ABI-unified.md) section 2.1. |
 | The entry file | yes | The file named by the manifest `entry` field. |
 | One module directory | optional | The modules the entry file imports, in the multi module layout. |
 
@@ -33,7 +37,7 @@ plugin_id/module.py
 plugin_id/utils.py
 ```
 
-The entry file stays at the archive root in both layouts. The loader puts the directory of the entry file on the import path and loads that file as a top level module named `dsh_user_plugin`, so a module directory beside the entry file is importable by name and a module directory anywhere else is not.
+The entry file stays at the archive root in both layouts. Its import semantics are specified in [PyABI](PyABI.md) section 2: the directory of the entry file is on the import path, so a module directory beside the entry file is importable by its absolute name and a module directory anywhere else is not.
 
 The entry file therefore imports the module directory by its absolute name:
 
@@ -47,12 +51,21 @@ def apply(ctx) -> None:
     pass
 
 
-@tool("add", "Add two numbers.")
-def add_tool(a: int, b: int) -> int:
-    return add(a, b)
+@tool(
+    "add",
+    "Add two numbers.",
+    parameters={
+        "type": "object",
+        "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+        "required": ["a", "b"],
+        "additionalProperties": False,
+    },
+)
+def add_tool(args) -> int:
+    return add(args["a"], args["b"])
 ```
 
-A relative import such as `from .module import add` fails with `attempted relative import with no known parent package`, because the entry file is not loaded as part of a package. The `@tool` decorator takes the tool name as its first positional argument and the description as its second; a call that supplies only the description fails at import time.
+A relative import such as `from .module import add` fails, because the entry file is not loaded as part of a package; [PyABI](PyABI.md) section 2 states why. The `@tool` decorator takes the tool name as its first positional argument and the description as its second; a call that supplies only the description fails at import time.
 
 The module directory name must be a legal Python module name. It does not have to equal the plugin id: an id such as `my-plugin` is valid while the module directory must then be `my_plugin` or another name without a hyphen. The name the entry file imports is the name the directory carries, and the manifest does not record it.
 
@@ -64,86 +77,35 @@ Sub packages below the module directory are allowed. A module directory may carr
 
 A package whose root holds no `mloader.plugin.json` is invalid. The loader rejects it before it extracts anything, and an installed directory with no manifest at its root is not a plugin, so discovery skips it.
 
-## 2. Package formats
+## 2. Python package archives
 
-A package is always a zip archive. These suffixes are supported:
-
-| Suffix | Meaning |
-| --- | --- |
-| `.zip` | An ordinary zip archive. |
-| `.mloader.pack` | The standard dsh-mloader package. The payload is the same zip archive under a dedicated suffix. |
-| `.pyz` | A package that is also an executable Python application. |
-
-The suffix selects no behavior inside the payload: the three formats carry the same archive and the same layout rules.
+A Python package is a zip archive. The conventional suffixes are `.mloader.pack` and `.zip`. Unlike a WebAssembly package, a Python package may also be a `.pyz`, a zip archive that is also an executable Python application.
 
 A `.pyz` file produced by `python3 -m zipapp` may begin with a shebang line, so the zip payload does not start at the first byte. A reader locates the payload from the end of central directory record and does not assume that the archive begins at offset 0.
 
 The loader never executes a package file. Running a `.pyz` as an application is the responsibility of the user, and a `__main__.py` inside the archive is unrelated to the entry point the manifest names.
 
-## 3. Installation, updates and removal
+The archive file name carries no meaning. A Python package named `anything.mloader.pack` and a package with no suffix install the same way when their bytes are a zip archive with a valid manifest; [Package](../Package.md) section 1 states the rule.
 
-The contents of a package are extracted before the loader can load them. The loader never imports code from inside an archive, so an archive that is present but not installed contributes no plugin.
+## 3. Building a Python package
 
-For a profile named `web`, a package whose manifest sets `"id": "test"` extracts to this directory:
+Any zip writer produces a valid package. The archive holds the entries of section 1 at its root. A conventional build from a plugin directory looks like this:
 
-```plaintext
-~/.dsh/profiles/web/mloader/plugins/test
+```sh
+cd my-plugin
+zip -r ../my-plugin.mloader.pack mloader.plugin.json entry.py plugin_id
 ```
 
-The directory name is the plugin id from the manifest, not the file name of the archive. An archive named `anything.mloader.pack` whose manifest sets `"id": "test"` installs as `test`, because the plugin id comes from the manifest and the directory name is only a convention that follows it.
+- The manifest must be at the archive root. Packing the plugin directory itself, so that the archive holds `my-plugin/mloader.plugin.json`, produces an invalid package.
+- Exclude `__pycache__` and `*.pyc`. They are interpreter and platform specific and the loader never needs them.
+- The suffix changes nothing about the payload. `.mloader.pack`, `.zip` and `.pyz` carry the same archive.
+- Repacking identical content changes the MD5, because the zip metadata changes, and the loader treats the result as a new version. Build the release archive once and distribute that file ([Package](../Package.md) section 4.2).
+- A packager may include a `.mloader.index.json` with `fileMd5` to publish per file checksums ahead of installation ([Package](../Package.md) section 4.1).
 
-The archive file stays where the user put it. The loader reads it and never modifies or moves it.
+## 4. Python-specific limits
 
-### 3.1 The install index
-
-The loader writes `.mloader.index.json` into the extracted plugin directory. It records what was installed:
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `schemaVersion` | integer | Version of this index format. The current version is `1`. |
-| `id` | string | Plugin id, equal to the manifest `id`. |
-| `installedAt` | string | ISO 8601 timestamp of the first installation. |
-| `updatedAt` | string | ISO 8601 timestamp of the most recent installation or update. |
-| `packageFile` | string | File name of the archive the plugin was installed from. |
-| `packageMd5` | string | Lowercase hexadecimal MD5 of the archive file. |
-| `fileMd5` | object | Map from a path relative to the plugin directory to the lowercase hexadecimal MD5 of that file. |
-
-`fileMd5` covers the files the archive provided. The index never lists itself, because it is written after the extraction finished.
-
-A packager may ship a `.mloader.index.json` in the archive to publish per file checksums ahead of installation. Such an index may set `schemaVersion`, `id` and `fileMd5`, and must not set `installedAt`, `updatedAt`, `packageFile` or `packageMd5`, because those describe an installation that the packager did not perform. When the archive carries one, the loader keeps its `fileMd5` and fills the installation fields itself, so a field the loader owns always wins over the archived value.
-
-### 3.2 Updates
-
-Installing a newer package over an existing plugin is how a plugin is updated. Before it extracts anything, the loader compares the MD5 of the new archive with `packageMd5` in the installed index.
-
-| Case | Behavior |
-| --- | --- |
-| The MD5 differs | The installed plugin directory moves to the trash, and the new package extracts in its place. |
-| The MD5 matches | The archive is byte identical to the installed one. The loader asks for a second confirmation before it reinstalls. |
-
-The comparison is over the archive file as bytes, so an archive repacked from identical content carries a different MD5 whenever the zip metadata differs, which is what a rebuild does. A repacked archive is therefore treated as a new version even when the plugin source did not change.
-
-The trash is the platform trash directory when the environment provides one. When it does not, the installed directory moves under `$TMPDIR` instead, and that location does not survive a reboot. An update replaces the previous installation, so the trash is a recovery window and not a rollback point.
-
-When the installed index carries `fileMd5`, the loader verifies the files on disk first. A file that no longer matches was edited after installation, which means the user owns that change. The loader then names the changed files, warns, and asks for a second confirmation before it replaces the directory.
-
-### 3.3 Removal
-
-A plugin is removed by deleting its directory under `mloader/plugins`, or by moving it to the trash. The loader offers the same operation and asks for a second confirmation first. Removing a plugin never touches the archive it was installed from, so the same archive installs it again.
-
-### 3.4 Extraction safety
-
-A package is untrusted input, so the loader validates every archive entry before it writes a byte:
-
-- An entry with an absolute path is rejected.
-- An entry whose path escapes the plugin directory through `..` is rejected.
-- A symbolic link entry is rejected.
-- An archive that exceeds the limit on entry count or on unpacked size is rejected.
-
-A rejected package leaves no partial plugin directory behind.
-
-## 4. Version compatibility
-
-`schemaVersion` versions the index format, not the plugin and not the ABI. A loader that reads an index whose `schemaVersion` is higher than the version it knows refuses to update that plugin and reports the version it found, so an older loader never overwrites an installation that a newer loader made.
-
-The manifest schema is versioned separately. A package whose manifest violates that schema is rejected at installation, before anything is extracted.
+- **Python 3.10 or later.** The plugin runs on the interpreter named by `pythonBin`, and the archive carries only the files the packager includes.
+- **No dependency resolution.** A plugin that imports a third party package either documents that requirement or vendors the code inside its module directory. The archive cannot declare a dependency for the loader to install ([Package](../Package.md) section 6).
+- **No platform targets.** `targets` is a WebAssembly package field; a Python manifest must not set it. Python code is not selected per operating system or CPU architecture by the package format.
+- **Native extensions are the plugin's responsibility.** An extension module is importable only when it matches the interpreter ABI and the platform. The package format does not verify that, so a plugin that needs one documents the requirement.
+- **No executable archive at install time.** A `.pyz` may be executable when the user runs it, but the loader only extracts it and never executes the archive.

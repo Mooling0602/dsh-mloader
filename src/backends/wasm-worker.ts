@@ -10,7 +10,7 @@
  * threads. Version 1 is declaration based: the apply result lists the tools and
  * events, and the host performs the registrations itself.
  *
- * The ABI is specified in `docs/ABI.md` §7.
+ * The ABI is specified in `docs/wasm/WasmABI.md`.
  *
  * @module backends/wasm-worker
  */
