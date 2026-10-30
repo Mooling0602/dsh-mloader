@@ -74,7 +74,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | 谁 | 怎么用 |
 | --- | --- |
 | 你 | `/mloader` 命令 |
-| 模型 | `mloader_status` 工具 |
+| 模型 | `mloader_status`、`mloader_info`、`mloader_load`、`mloader_unload` 和 `mloader_reload` 工具 |
 
 `/mloader` 列出全部插件，`/mloader <plugin-id>` 查看单个插件，`/mloader load <plugin-id>`、`/mloader unload <plugin-id>` 和 `/mloader reload <plugin-id>` 在运行时切换插件。只有已经装在 profile 里的插件才能被加载。
 
@@ -99,6 +99,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | `profileDir` | 自动探测 | 覆盖加载器通过 dsh 解析到的 profile 目录，不设置时自动探测。用于测试。 |
 | `autoEnable` | `true` | 已安装的插件是否随 dsh 启动。`false` 时插件保持发现状态，需要手动加载。 |
 | `pythonBin` | `python3` | 用来创建共享环境的基础 Python 解释器。Python 插件在该环境中运行。 |
+| `shellPath` | `[]` | 添加到 Python 环境准备过程及插件 PATH 前面的目录列表。请使用绝对路径，`~` 不会展开。 |
 | `enablePyc` | `false` | 是否保留 Python 写在插件旁边的字节码缓存。关闭时每次重新加载都执行磁盘上的代码，开启则是用这个保证换取更快的启动。 |
 | `statusTool` | `true` | 是否为模型注册 `mloader_status` 工具。 |
 | `command` | `true` | `/mloader` 命令：`true` 用默认名，字符串为自定义名，`false` 关闭。 |

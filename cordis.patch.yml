@@ -27,6 +27,8 @@
         # uv must be on PATH. The value is used when the environment does not
         # exist yet.
         pythonBin: python3
+        # Additional executable search directories for Python child processes.
+        shellPath: []
         # Keep the bytecode cache the Python interpreter writes beside a plugin
         # entry. It is off by default because the interpreter invalidates a cache
         # entry by the source mtime in whole seconds plus the source size, so an

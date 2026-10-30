@@ -17,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withShellPath } from './shell-path.js';
 /** Command line script of the Python runtime, beside this compiled module. */
 export const PYTHON_CLI_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'runtime', 'python_sdk', 'run_cli.py');
 /** Timeout used when the caller supplies none. */
@@ -84,7 +85,7 @@ export async function syncPythonEnvironment(pluginDir, options) {
     const interpreter = existsSync(sharedVenvPython(profileDir))
         ? sharedVenvPython(profileDir)
         : pythonBin;
-    const outcome = await runCommand(interpreter, args, timeoutMs);
+    const outcome = await runCommand(interpreter, args, timeoutMs, withShellPath(process.env, options.shellPath));
     if (outcome.timedOut) {
         throw new Error('python environment setup timed out after ' + String(timeoutMs) + 'ms');
     }
@@ -143,15 +144,16 @@ function parsePayload(stdout) {
  * @param command - Executable.
  * @param args - Arguments.
  * @param timeoutMs - Deadline after which the process is killed.
+ * @param env - Environment passed to the process.
  * @returns The exit status and captured output.
  */
-function runCommand(command, args, timeoutMs) {
+function runCommand(command, args, timeoutMs, env) {
     return new Promise((resolve, reject) => {
         let child;
         try {
             child = spawn(command, args, {
                 stdio: ['ignore', 'pipe', 'pipe'],
-                env: process.env,
+                env,
                 windowsHide: true,
             });
         }

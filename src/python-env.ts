@@ -19,6 +19,7 @@ import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { LoaderLogger } from './types.js'
+import { withShellPath } from './shell-path.js'
 
 /** Command line script of the Python runtime, beside this compiled module. */
 export const PYTHON_CLI_SCRIPT = join(
@@ -51,6 +52,8 @@ export interface PythonEnvironmentOptions {
   profileDir?: string
   /** Base interpreter used to create the environment and run the CLI. */
   pythonBin: string
+  /** Directories prepended to the child process executable search path. */
+  shellPath?: string[]
   /** Logger for debug output. */
   logger?: LoaderLogger
   /** Deadline for environment setup. Defaults to five minutes. */
@@ -140,7 +143,7 @@ export async function syncPythonEnvironment(
   const interpreter = existsSync(sharedVenvPython(profileDir))
     ? sharedVenvPython(profileDir)
     : pythonBin
-  const outcome = await runCommand(interpreter, args, timeoutMs)
+  const outcome = await runCommand(interpreter, args, timeoutMs, withShellPath(process.env, options.shellPath))
   if (outcome.timedOut) {
     throw new Error('python environment setup timed out after ' + String(timeoutMs) + 'ms')
   }
@@ -203,15 +206,16 @@ function parsePayload(stdout: string): Record<string, unknown> | undefined {
  * @param command - Executable.
  * @param args - Arguments.
  * @param timeoutMs - Deadline after which the process is killed.
+ * @param env - Environment passed to the process.
  * @returns The exit status and captured output.
  */
-function runCommand(command: string, args: string[], timeoutMs: number): Promise<CommandOutcome> {
+function runCommand(command: string, args: string[], timeoutMs: number, env: NodeJS.ProcessEnv): Promise<CommandOutcome> {
   return new Promise<CommandOutcome>((resolve, reject) => {
     let child
     try {
       child = spawn(command, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: process.env,
+        env,
         windowsHide: true,
       })
     } catch (error: unknown) {

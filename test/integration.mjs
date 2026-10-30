@@ -140,6 +140,21 @@ async function main() {
   const statusResult = await tools.get('mloader_status').execute({})
   check('mloader_status reports every plugin', statusResult?.count === loader.list().length, JSON.stringify(statusResult).slice(0, 200))
 
+  section('7a. Model-facing management tools')
+  const managementNames = ['mloader_info', 'mloader_load', 'mloader_unload', 'mloader_reload']
+  check('management tools are registered', managementNames.every((name) => names.includes(name)), names.join(','))
+  const info = await tools.get('mloader_info').execute({ id: 'py-hello' })
+  check('info returns the command detail format', info.text.includes('Plugin py-hello:') && info.text.includes('Version:'))
+  await tools.get('mloader_unload').execute({ id: 'py-hello' })
+  check('unload revokes the plugin tools', tools.get('py_greet') === undefined)
+  await tools.get('mloader_load').execute({ id: 'py-hello' })
+  check('load restores the plugin tools', tools.get('py_greet') !== undefined)
+  await tools.get('mloader_reload').execute({ id: 'py-hello' })
+  check('reload leaves the plugin applied', loader.list().find((p) => p.id === 'py-hello')?.state === 'applied')
+  let unknownFailed = false
+  try { await tools.get('mloader_reload').execute({ id: 'missing' }) } catch { unknownFailed = true }
+  check('unknown plugin produces a tool error', unknownFailed)
+
   section('8. Unload one plugin without affecting the others')
   await loader.unload('py-decl')
   const afterUnload = loader.list()
@@ -153,6 +168,7 @@ async function main() {
   await new Promise((resolve) => setTimeout(resolve, 800))
   const finalNames = tools.schemas().map((schema) => schema.name)
   check('every external tool is revoked', !finalNames.some((n) => n.startsWith('py_')), `leftover: ${finalNames.join(',')}`)
+  check('management tools are revoked', managementNames.every((name) => !finalNames.includes(name)), finalNames.join(','))
 
   // Summary
   console.log('')

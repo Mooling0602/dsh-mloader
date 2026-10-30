@@ -64,7 +64,8 @@ src/
   runtime/
     python_sdk/            canonical Python runtime package and packaging command line
   tools/status.ts          mloader_status tool and the shared status formatter
-  commands/mloader.ts      /mloader command group, called by the user
+  tools/manage.ts          model-facing plugin detail and lifecycle tools
+  commands/mloader.ts      /mloader command group and shared lifecycle operations
 scripts/build-client.mjs   deterministic build of the committed client bundle
 client.js                  committed generated browser bundle
 locale/en.json             title and description the Plugins page renders
@@ -289,6 +290,7 @@ The defaults are defined in `src/index.ts` and repeated in `cordis.patch.yml`. A
 | `profileDir` | `undefined` | Override the detected profile directory. Intended for tests, never for production. |
 | `autoEnable` | `true` | Start every plugin whose manifest has `enabled: true`. When `false`, plugins stay `discovered`. |
 | `pythonBin` | `"python3"` | Base interpreter used to create the shared profile environment. Python plugins run with the environment interpreter; this value is not consulted again while that interpreter exists. |
+| `shellPath` | `[]` | Array of literal directory paths prepended in order to the inherited PATH for Python environment setup and Python plugin processes. Paths are not expanded, so use an absolute path instead of `~`. The shared virtual environment's executable directory precedes these entries in plugin processes, and a manifest `env` PATH overrides the resulting PATH. The host process PATH is unchanged. |
 | `enablePyc` | `false` | Keep the `__pycache__` directory a Python plugin writes when the interpreter loads its entry file. It is off by default, so a reload always runs the code currently on disk. Enabling it trades that guarantee for a faster start. |
 | `statusTool` | `true` | Register the `mloader_status` tool for the model. |
 | `command` | `true` | Register the `/mloader` command group. `false` disables it; a string sets a custom command name matching `^[a-z][a-z0-9_-]*$`. |
@@ -444,6 +446,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **A released example must pass discovery like any other plugin.** Release is not a privilege: if the example's manifest is invalid, or its built-in marker is missing, discovery reports it and the loader continues.
 - **The seed is skipped when no profile directory is known.** The loader does not write into a directory it cannot identify as the active profile.
 - **`mloader_status` and the `/mloader` list share one formatter.** Both call `buildStatus` and `format` from `tools/status.ts`; a change to one surface updates the other by construction. A list query returns `{ count, plugins, byBackend, byState }`; the model's tool also accepts an id and then returns `{ plugin }` rather than `{ plugins }`, and the formatter must accept both shapes. A snapshot carries `id`, `name`, `version`, `backend`, `state`, `tools`, `events` and `registrations`, plus `error` only when the plugin has failed.
+- **The management tools share the command operations.** `mloader_info`, `mloader_load`, `mloader_unload` and `mloader_reload` each require an exact plugin `id` and return the same text as the corresponding command form. Failed operations raise tool errors. The tools register independently of the optional command service, the `command` setting and the `statusTool` setting, and are disposed with the loader. Load, unload and reload affect runtime state only; they do not install plugins or change manifests.
 - **The command service is optional.** The loader does not inject `commands`; it probes `ctx.get('commands')` at runtime and skips command registration with a debug log when the service is missing. A missing command must never prevent plugin mounting.
 - **The command is one command group named `/mloader`.** The default command name matches `^[a-z][a-z0-9_-]*$`. An invalid configured name is a warning and the command is not registered. A user input error in the handler becomes a `{ kind: 'error' }` command result instead of a thrown exception.
 - **The command forms are fixed.** `/mloader` and `/mloader status` list every known plugin through the shared formatter. `/mloader <id>` renders a detail block with `Plugin <id>:`, `Name:`, `Version:`, `Backend:`, `State: <state> (loaded|not loaded)`, `Tools:` (or `none`), `Events:` (or `none`), `Registrations:` and, when present, an `Error:` line. `/mloader load <id>`, `/mloader unload <id>` and `/mloader reload <id>` request the lifecycle transition; loading an already loaded plugin and unloading a plugin that is not loaded succeed with a short message and do not call the manager. Unknown ids return `Unknown plugin "<id>".`; `help`, malformed input and a missing id return the usage text. The reserved words `status`, `help`, `load`, `unload` and `reload` win over a plugin id of the same name.

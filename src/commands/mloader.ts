@@ -50,7 +50,7 @@ export interface MloaderCommandTarget {
 }
 
 /** Result of one command invocation, as the commands service expects it. */
-interface CommandResult {
+export interface CommandResult {
   kind: 'success' | 'error'
   text: string
 }
@@ -183,6 +183,30 @@ async function reloadPlugin(target: MloaderCommandTarget, id: string): Promise<C
   }
 }
 
+/** Operations that address one plugin. */
+export type MloaderAction = 'info' | 'load' | 'unload' | 'reload'
+
+/**
+ * Run a plugin operation with the same lifecycle and output as the slash command.
+ *
+ * @param target - Plugin snapshots and lifecycle operations.
+ * @param action - The operation to perform.
+ * @param id - The exact plugin identifier.
+ * @returns The command result, including transition errors.
+ */
+export async function runMloaderAction(
+  target: MloaderCommandTarget,
+  action: MloaderAction,
+  id: string,
+): Promise<CommandResult> {
+  switch (action) {
+    case 'info': return showDetail(target, id)
+    case 'load': return await loadPlugin(target, id)
+    case 'unload': return await unloadPlugin(target, id)
+    case 'reload': return await reloadPlugin(target, id)
+  }
+}
+
 /**
  * Dispatch one invocation.
  *
@@ -211,14 +235,14 @@ async function dispatch(
     if (RESERVED_WORDS.has(word)) {
       return { kind: 'error', text: renderUsage(commandName) }
     }
-    return showDetail(target, word)
+    return await runMloaderAction(target, 'info', word)
   }
   if (tokens.length === 2) {
     const word = tokens[0] as string
     const id = tokens[1] as string
-    if (word === 'load') return await loadPlugin(target, id)
-    if (word === 'unload') return await unloadPlugin(target, id)
-    if (word === 'reload') return await reloadPlugin(target, id)
+    if (word === 'load' || word === 'unload' || word === 'reload') {
+      return await runMloaderAction(target, word, id)
+    }
   }
   return { kind: 'error', text: renderUsage(commandName) }
 }

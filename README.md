@@ -74,7 +74,7 @@ Two surfaces read the same snapshot:
 | Who | How |
 | --- | --- |
 | You | the `/mloader` command |
-| The model | the `mloader_status` tool |
+| The model | `mloader_status`, `mloader_info`, `mloader_load`, `mloader_unload`, and `mloader_reload` tools |
 
 `/mloader` lists every plugin, `/mloader <plugin-id>` shows one, and `/mloader load <plugin-id>`, `/mloader unload <plugin-id>` and `/mloader reload <plugin-id>` change one at runtime. Loading only works for a plugin that is already installed under the profile.
 
@@ -99,6 +99,7 @@ Every key is optional. The default column is what dsh-mloader uses when you leav
 | `profileDir` | detected | Overrides the profile directory the loader resolves through dsh, which is otherwise detected. For tests. |
 | `autoEnable` | `true` | Whether installed plugins start with dsh. `false` leaves them discovered until you load one. |
 | `pythonBin` | `python3` | The base Python interpreter used to create the shared environment. Python plugins run in that environment. |
+| `shellPath` | `[]` | Directories to prepend to the PATH used by Python environment setup and plugins. Use absolute paths; `~` is not expanded. |
 | `enablePyc` | `false` | Whether Python keeps the bytecode cache it writes beside a plugin. Off means a reload always runs the code on disk, so turning it on trades that for a faster start. |
 | `statusTool` | `true` | Whether the `mloader_status` tool is registered for the model. |
 | `command` | `true` | The `/mloader` command: `true` for the default name, a string for a custom name, `false` to disable it. |

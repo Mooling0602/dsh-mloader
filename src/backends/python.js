@@ -17,6 +17,7 @@ import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROTOCOL_VERSION } from '../contract.js';
 import { projectEventArgs } from '../serialize.js';
+import { withShellPath } from '../shell-path.js';
 const RUNTIME_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'runtime', 'python_sdk');
 /**
  * Launcher of the bundled Python runtime.
@@ -68,6 +69,7 @@ export class PythonBackendInstance {
     capabilities;
     logger;
     pythonBin;
+    shellPath;
     venvDir;
     onCrash;
     enablePyc;
@@ -89,10 +91,11 @@ export class PythonBackendInstance {
      * @param options - Logger, interpreter and crash callback.
      */
     constructor(spec, options = {}) {
-        const { logger, pythonBin = 'python3', venvDir, onCrash, enablePyc = false } = options;
+        const { logger, pythonBin = 'python3', shellPath = [], venvDir, onCrash, enablePyc = false } = options;
         this.spec = spec;
         this.logger = logger;
         this.pythonBin = pythonBin;
+        this.shellPath = shellPath;
         this.venvDir = venvDir;
         this.onCrash = onCrash;
         this.enablePyc = enablePyc;
@@ -111,7 +114,7 @@ export class PythonBackendInstance {
      */
     async start() {
         const { spec, pythonBin } = this;
-        const env = {};
+        let env = {};
         for (const [key, value] of Object.entries(process.env)) {
             if (value === undefined)
                 continue;
@@ -121,6 +124,7 @@ export class PythonBackendInstance {
                 continue;
             env[key] = value;
         }
+        env = withShellPath(env, this.shellPath);
         if (this.venvDir !== undefined) {
             // The interpreter already knows its prefix. VIRTUAL_ENV and the PATH entry
             // make a child process a plugin starts resolve the same environment.

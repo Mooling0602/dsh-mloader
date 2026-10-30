@@ -32,6 +32,7 @@ import { syncPythonEnvironment } from './python-env.js';
 import { PLUGIN_STATE, profilePluginsDir, resolveProfileDir, resolveRoots } from './contract.js';
 import { WasmBackendInstance } from './backends/wasm.js';
 import { createStatusTool } from './tools/status.js';
+import { createManagementTools } from './tools/manage.js';
 import { DEFAULT_COMMAND_NAME, registerMloaderCommand } from './commands/mloader.js';
 import { registerMloaderHttp, WasmDisabledError } from './http.js';
 import { installSeedExamples } from './seed.js';
@@ -53,6 +54,7 @@ const DEFAULTS = {
     profileDir: undefined,
     autoEnable: true,
     pythonBin: 'python3',
+    shellPath: [],
     enablePyc: false,
     statusTool: true,
     command: true,
@@ -375,6 +377,7 @@ export class PluginManager {
             ? new PythonBackendInstance(spec, {
                 logger: this.logger,
                 pythonBin: environment?.python ?? this.config.pythonBin,
+                shellPath: this.config.shellPath,
                 venvDir: environment?.venv,
                 enablePyc: this.config.enablePyc,
                 onCrash: (pluginId, info) => this.#onPythonCrash(record, pluginId, info),
@@ -419,6 +422,7 @@ export class PluginManager {
         const environment = await syncPythonEnvironment(spec.baseDir, {
             profileDir: this.config.profileDir,
             pythonBin: this.config.pythonBin ?? 'python3',
+            shellPath: this.config.shellPath,
             logger: this.logger,
         });
         if (environment === undefined)
@@ -774,6 +778,16 @@ export async function apply(ctx, config = {}) {
     manager.bootTask = bootTask;
     if (settings.watch !== false)
         manager.watchRoots();
+    const target = {
+        list: () => manager.list(),
+        enable: (id) => manager.enable(id),
+        disable: (id) => manager.disable(id),
+        reload: (id) => manager.reload(id),
+    };
+    for (const tool of createManagementTools(target)) {
+        const disposeTool = ctx.tools.register(tool);
+        ctx.effect(() => () => disposeTool(), `dsh-mloader:${tool.name}`);
+    }
     if (settings.statusTool !== false) {
         const disposeStatusTool = ctx.tools.register(createStatusTool(() => manager.list()));
         ctx.effect(() => () => disposeStatusTool(), 'dsh-mloader:status-tool');
@@ -783,12 +797,6 @@ export async function apply(ctx, config = {}) {
         const commandName = typeof settings.command === 'string'
             ? settings.command
             : DEFAULT_COMMAND_NAME;
-        const target = {
-            list: () => manager.list(),
-            enable: (id) => manager.enable(id),
-            disable: (id) => manager.disable(id),
-            reload: (id) => manager.reload(id),
-        };
         const disposeCommand = registerMloaderCommand(ctx, target, logger, commandName);
         if (disposeCommand) {
             ctx.effect(() => () => disposeCommand(), 'dsh-mloader:command');

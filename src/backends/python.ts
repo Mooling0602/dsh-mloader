@@ -19,6 +19,7 @@ import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PROTOCOL_VERSION } from '../contract.js'
 import { projectEventArgs } from '../serialize.js'
+import { withShellPath } from '../shell-path.js'
 import type {
   ApplyResult,
   BackendInstance,
@@ -97,6 +98,8 @@ export interface PythonBackendOptions {
   logger?: LoaderLogger
   /** Python interpreter to start. Defaults to `python3`. */
   pythonBin?: string
+  /** Directories prepended to the child process executable search path. */
+  shellPath?: string[]
   /** Shared virtual environment the interpreter belongs to, when there is one. */
   venvDir?: string
   /** Called once when the child exits without being stopped by the loader. */
@@ -149,6 +152,7 @@ export class PythonBackendInstance implements BackendInstance {
 
   private readonly logger: LoaderLogger | undefined
   private readonly pythonBin: string
+  private readonly shellPath: string[]
   private readonly venvDir: string | undefined
   private readonly onCrash: CrashHandler | undefined
   private readonly enablePyc: boolean
@@ -172,10 +176,11 @@ export class PythonBackendInstance implements BackendInstance {
    * @param options - Logger, interpreter and crash callback.
    */
   constructor(spec: PluginSpec, options: PythonBackendOptions = {}) {
-    const { logger, pythonBin = 'python3', venvDir, onCrash, enablePyc = false } = options
+    const { logger, pythonBin = 'python3', shellPath = [], venvDir, onCrash, enablePyc = false } = options
     this.spec = spec
     this.logger = logger
     this.pythonBin = pythonBin
+    this.shellPath = shellPath
     this.venvDir = venvDir
     this.onCrash = onCrash
     this.enablePyc = enablePyc
@@ -196,13 +201,14 @@ export class PythonBackendInstance implements BackendInstance {
   async start(): Promise<unknown> {
     const { spec, pythonBin } = this
 
-    const env: NodeJS.ProcessEnv = {}
+    let env: NodeJS.ProcessEnv = {}
     for (const [key, value] of Object.entries(process.env)) {
       if (value === undefined) continue
       if (/KEY|PASSWORD|SECRET|TOKEN/i.test(key)) continue
       if (key.startsWith('DSH_')) continue
       env[key] = value
     }
+    env = withShellPath(env, this.shellPath)
     if (this.venvDir !== undefined) {
       // The interpreter already knows its prefix. VIRTUAL_ENV and the PATH entry
       // make a child process a plugin starts resolve the same environment.
