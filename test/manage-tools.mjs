@@ -53,7 +53,26 @@ test('management tools preserve slash command output and lifecycle decisions', a
   await assert.rejects(tools.mloader_unload.execute({ id: 'example' }), /transition failed/)
 })
 
-test('management tools register independently of command and status tool and are disposed', async () => {
+test('statusTool disables all model-facing loader tools', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mloader-tools-disabled-'))
+  const disposers = []
+  const tools = new Map()
+  const ctx = {
+    tools: { register(tool) { tools.set(tool.name, tool); return () => tools.delete(tool.name) } },
+    on() {}, off() {}, get() {},
+    effect(fn) { disposers.push(fn()) },
+    provide() {},
+  }
+  try {
+    await apply(ctx, { roots: [root], profilePlugins: false, seedExamples: false, console: false, watch: false, statusTool: false, command: false })
+    assert.deepEqual([...tools.keys()], [])
+  } finally {
+    for (const dispose of disposers.reverse()) await dispose()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('statusTool enables management tools independently of command and disposes them', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mloader-management-'))
   const disposers = []
   const tools = new Map()
@@ -73,9 +92,9 @@ test('management tools register independently of command and status tool and are
     }
     await apply(ctx, {
       roots: [root], profilePlugins: false, seedExamples: false, console: false,
-      watch: false, statusTool: false, command: false,
+      watch: false, statusTool: true, command: false,
     })
-    assert.deepEqual([...tools.keys()].sort(), ['mloader_info', 'mloader_load', 'mloader_reload', 'mloader_unload'])
+    assert.deepEqual([...tools.keys()].sort(), ['mloader_info', 'mloader_load', 'mloader_reload', 'mloader_status', 'mloader_unload'])
     const deadline = Date.now() + 10000
     while (manager.list().find((plugin) => plugin.id === 'example')?.state !== 'applied') {
       if (Date.now() > deadline) throw new Error('plugin did not start')
