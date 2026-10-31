@@ -72,15 +72,15 @@ Windows 下解释器是 `<profile>/mloader/.venv/Scripts/python.exe`。环境在
 
 ### 3.1 风格 A：Cordis 对齐
 
-插件导出一个入口函数，并在其中注册能力。
+插件导出一个入口函数，并在其中注册能力。将上下文标注为 `Context` 可以让静态工具提供补全和 API 文档。
 
 ```python
-from dsh_mloader_sdk import plugin
+from dsh_mloader_sdk import Context, plugin
 
 NAME = "my-plugin"
 
 @plugin
-def apply(ctx):
+def apply(ctx: Context):
     ctx.logger.info("my-plugin mounted")
 
     @ctx.tools.register(

@@ -72,15 +72,15 @@ The package layout implications are specified in [Package](Package.md) section 1
 
 ### 3.1 Style A: Cordis aligned
 
-The plugin exports an entry function and registers capabilities inside it.
+The plugin exports an entry function and registers capabilities inside it. Annotating the context as `Context` gives static tools the information needed for completion and API documentation.
 
 ```python
-from dsh_mloader_sdk import plugin
+from dsh_mloader_sdk import Context, plugin
 
 NAME = "my-plugin"
 
 @plugin
-def apply(ctx):
+def apply(ctx: Context):
     ctx.logger.info("my-plugin mounted")
 
     @ctx.tools.register(

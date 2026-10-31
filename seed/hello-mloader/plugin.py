@@ -30,13 +30,13 @@ Two rules apply to every handler:
   notification that never waits for a reply.
 """
 
-from dsh_mloader_sdk import plugin
+from dsh_mloader_sdk import Context, plugin
 
 NAME = "hello-mloader"
 
 
 @plugin
-def apply(ctx):
+def apply(ctx: Context):
     """Register the example capabilities.
 
     The runtime calls this function once during startup. Every registration is
