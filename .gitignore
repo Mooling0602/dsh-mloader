@@ -6,3 +6,4 @@ __pycache__/
 .gopath/
 *.wasm
 dsh-*.log
+.venv/
