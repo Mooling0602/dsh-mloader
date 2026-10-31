@@ -107,6 +107,18 @@ def apply(ctx):
   return dir
 }
 
+async function waitForPlugins(root, ids, timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs
+  let plugins = []
+  do {
+    plugins = root.get('mloader')?.list() ?? []
+    if (ids.every((id) => plugins.some((plugin) => plugin.id === id && plugin.state === 'applied'))) return plugins
+    if (plugins.some((plugin) => ids.includes(plugin.id) && plugin.state === 'failed')) break
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  } while (Date.now() < deadline)
+  return plugins
+}
+
 async function main() {
   let tempRoot
   try {
@@ -268,7 +280,7 @@ async function main() {
       { name: 'dsh-mloader', inject: ['tools'], apply: loaderApply },
       { roots: [join(tempRoot, 'extra')], profileDir: fakeProfile, pythonBin: 'python3', seedExamples: false, console: false },
     )
-    await new Promise((r) => setTimeout(r, 3500))
+    await waitForPlugins(root, ['from-extra', 'from-profile'])
 
     const mloader = root.get('mloader')
     const loadedIds = (mloader?.list() ?? []).map((p) => p.id).sort()
@@ -278,8 +290,8 @@ async function main() {
     check('both plugins are applied', (mloader?.list() ?? []).filter((p) => p.state === 'applied').length === 2, JSON.stringify(states))
 
     const tools = root.get('tools')
-    check('the profile plugin tool is callable', (await tools.get('tool_from_profile').execute({}))?.ok === true)
-    check('the explicit roots plugin tool is callable', (await tools.get('tool_from_extra').execute({}))?.ok === true)
+    check('the profile plugin tool is callable', (await tools.get('tool_from_profile')?.execute({}))?.ok === true)
+    check('the explicit roots plugin tool is callable', (await tools.get('tool_from_extra')?.execute({}))?.ok === true)
 
     await fiber.dispose()
     await new Promise((r) => setTimeout(r, 500))
@@ -311,7 +323,7 @@ async function main() {
         pythonBin: 'python3',
       },
     )
-    await new Promise((r) => setTimeout(r, 3500))
+    await waitForPlugins(root3, ['from-extra'])
     const ids3 = (root3.get('mloader')?.list() ?? []).map((p) => p.id).sort()
     check('only the explicit roots are loaded', ids3.join(',') === 'from-extra', JSON.stringify(ids3))
     check('from-profile is absent', !ids3.includes('from-profile'), JSON.stringify(ids3))
