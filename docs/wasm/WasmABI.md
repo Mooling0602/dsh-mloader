@@ -29,7 +29,7 @@ The core ABI depends on the WebAssembly core specification only. It does not req
 
 A module missing any of these exports fails to initialize, and the plugin is marked `failed`.
 
-The manifest `entry` field names the `.wasm` file, resolved against the manifest directory. A WebAssembly package selects the artifact through `targets` instead; [Package](Package.md) section 1 specifies the field. The worker reads that file, compiles it and instantiates it.
+The manifest `entry` field names the `.wasm` file, resolved against the manifest directory. Selection through `targets` is a package format target contract and is not implemented; [Package](Package.md) section 1 specifies the field. The worker reads that file, compiles it and instantiates it.
 
 ## 2. Request and result contract
 

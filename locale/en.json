@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Multi-runtime plugin loader (dsh-mloader)",
-    "description": "Hosts Python and WebAssembly plugins as capabilities of one Cordis plugin, and registers their tools and commands."
+    "description": "Hosts Python and WebAssembly plugins as capabilities of one Cordis plugin, and registers their tools."
   }
 }

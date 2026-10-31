@@ -29,7 +29,7 @@
 
 缺少任何一个导出的模块都无法初始化，插件会被标记为 `failed`。
 
-清单的 `entry` 字段指定 `.wasm` 文件，按清单目录解析。WebAssembly 包改用 `targets` 选择产物；[Package](Package.zh.md) 第 1 节规定了该字段。worker 读取这个文件、编译并实例化它。
+清单的 `entry` 字段指定 `.wasm` 文件，按清单目录解析。通过 `targets` 选择产物是尚未实现的包格式目标契约；[Package](Package.zh.md) 第 1 节规定了该字段。worker 读取这个文件、编译并实例化它。
 
 ## 2. 请求与结果约定
 

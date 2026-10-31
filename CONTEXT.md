@@ -73,7 +73,7 @@ locale/en.json             title and description the Plugins page renders
 locale/zh.json             Simplified Chinese copy of the same two fields
 tsconfig.client.json       compiler configuration for src/client
 seed/hello-mloader/        bundled example plugin: manifest, plugin.py and built-in marker
-test/                      21 self-contained suites and their fixtures
+test/                      standalone suites and their fixtures
 docs/ABI-unified.md        shared plugin contract
 docs/Package.md             shared package format and install rules, implemented for Python
 docs/python-sdk/PyABI.md   Python backend contract and SDK
@@ -229,31 +229,37 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 
 ### Test matrix
 
-| Suite | Assertions | Covers | Needs `.wasm` |
-| --- | --- | --- | --- |
-| `integration.mjs` | 23 | Python end to end on a real Cordis context and a real tool runtime | no |
-| `edge-cases.mjs` | 17 | schema pre-validation, event whitelist, crash isolation, unload cleanup | no |
-| `dual-backend.mjs` | 19 | Python and WebAssembly plugins in one loader | yes, otherwise skips |
-| `wasm-safety.mjs` | 13 | a looping WebAssembly plugin does not block the host thread | yes, otherwise skips |
-| `waterfall.mjs` | 10 | tool execution chain is not blocked by event listeners | no |
-| `reentrancy.mjs` | 13 | a real Python subprocess survives reentrant event delivery | no |
-| `exec-payload.mjs` | 43 | host exec objects cross the process boundary safely; tools stay usable after a dirty payload | no |
-| `command.mjs` | 72 | the `/mloader` command group on a real command runtime: list, detail, load, unload, reload, usage and reserved words | no |
-| `profile-install.mjs` | 37 | profile path resolution and plugin loading, including `ctx.baseUrl` | no |
-| `seed.mjs` | 33 | bundled example release and refresh, reserved id enforcement and the built-in marker | no |
-| `crash-safety.mjs` | 10 | EPIPE, orphan process and unload hang resistance | no |
-| `console.mjs` | 19 | terminal output levels and write failure tolerance | no |
-| `plugin-toggle.mjs` | 62 | runtime switches through the operator routes: real load and unload, manual enable of a manifest-disabled plugin, crash recovery, route removal and the non-web compatibility case | no |
-| `client-bundle.mjs` | 18 | generated bundle, slot key, zh and en dictionaries, rendering states and switch requests | no |
-| `hot-refresh.mjs` | 32 | mounting a plugin directory installed at runtime, unmounting a deleted one, no reload on a file edit, recovery from a directory caught mid copy, bounded retry of a broken one, disabled and `autoEnable: false` policy, missing root, `watch: false` and watcher shutdown on teardown | no |
-| `output-inference.mjs` | 20 | result schema derived from a return annotation on both registration styles, the mapping table, explicit `output` precedence, and the host default for an absent, `Any` or unresolvable annotation | no |
-| `encoding.mjs` | 4 | UTF-8 standard streams survive a manifest that sets `PYTHONIOENCODING` to ASCII, for a non-ASCII value and for a stray non-ASCII diagnostic | no |
-| `bytecode.mjs` | 4 | no `__pycache__` under the default, and one under `enablePyc: true` | no |
-| `package-meta.mjs` | 16 | the locale files, their `meta.title` and `meta.description`, the exports that expose them and the `files` entry that ships them | no |
-| `python-package.mjs` | 44 | pack, install, requirements merge, install index, update confirmation, trash removal, the Python 3.10 TOML fallback, the requirements only venv path and unsafe archive rejection | no |
-| `python-env.mjs` | 20 | shared profile environment, installed SDK console script, uv requirement, venv module fallback, and the loader starting a plugin with the shared interpreter | no |
+| Suite | Covers | Needs `.wasm` |
+| --- | --- | --- |
+| `integration.mjs` | Python end to end on a real Cordis context and a real tool runtime | no |
+| `edge-cases.mjs` | schema pre-validation, event whitelist, crash isolation, unload cleanup | no |
+| `dual-backend.mjs` | Python and WebAssembly plugins in one loader | yes, otherwise skips |
+| `wasm-safety.mjs` | a looping WebAssembly plugin does not block the host thread | yes, otherwise skips |
+| `waterfall.mjs` | tool execution chain is not blocked by event listeners | no |
+| `reentrancy.mjs` | a real Python subprocess survives reentrant event delivery | no |
+| `exec-payload.mjs` | host exec objects cross the process boundary safely; tools stay usable after a dirty payload | no |
+| `command.mjs` | the `/mloader` command group on a real command runtime: list, detail, load, unload, reload, usage and reserved words | no |
+| `profile-install.mjs` | profile path resolution and plugin loading, including `ctx.baseUrl` | no |
+| `seed.mjs` | bundled example release and refresh, reserved id enforcement and the built-in marker | no |
+| `crash-safety.mjs` | EPIPE, orphan process and unload hang resistance | no |
+| `console.mjs` | terminal output levels and write failure tolerance | no |
+| `plugin-toggle.mjs` | runtime switches through the operator routes: real load and unload, manual enable of a manifest-disabled plugin, crash recovery, route removal and the non-web compatibility case | no |
+| `client-bundle.mjs` | generated bundle, slot key, zh and en dictionaries, rendering states and switch requests | no |
+| `hot-refresh.mjs` | mounting a plugin directory installed at runtime, unmounting a deleted one, no reload on a file edit, recovery from a directory caught mid copy, bounded retry of a broken one, disabled and `autoEnable: false` policy, missing root, `watch: false` and watcher shutdown on teardown | no |
+| `output-inference.mjs` | result schema derived from a return annotation on both registration styles, the mapping table, explicit `output` precedence, and the host default for an absent, `Any` or unresolvable annotation | no |
+| `encoding.mjs` | UTF-8 standard streams survive a manifest that sets `PYTHONIOENCODING` to ASCII, for a non-ASCII value and for a non-ASCII write to the detached standard output | no |
+| `bytecode.mjs` | no `__pycache__` under the default, and one under `enablePyc: true` | no |
+| `package-meta.mjs` | the locale files, their `meta.title` and `meta.description`, the exports that expose them and the `files` entry that ships them | no |
+| `python-package.mjs` | pack, install, requirements merge, install index, update confirmation, trash removal, the Python 3.10 TOML fallback, the requirements only venv path and unsafe archive rejection | no |
+| `python-env.mjs` | shared profile environment, installed SDK console script, uv requirement, venv module fallback, and the loader starting a plugin with the shared interpreter | no |
+| `config-editor.mjs` | Configuration projection, validation and revision conflicts | no |
+| `manage-tools.mjs` | Model-facing management tools, configuration gating and lifecycle | no |
+| `shell-path.mjs` | Child process PATH configuration | no |
+| `python-runtime-state.mjs` | Python runtime behavior when the host channel is unavailable | no |
+| `python-logging.mjs` | standard stream isolation: every direct output route is discarded, stdin is detached, and only `ctx.logger` reaches the loader logger, including from a cleanup | no |
+| `python-sdk-scripts.mjs` | Python SDK maintenance scripts and virtual environment exclusion | no |
 
-The baseline is 529 assertions across 21 suites, 32 of them requiring a compiled `.wasm` fixture. A run without the two binaries reports 497 assertions passed and skips the two WebAssembly suites. Skipping is an environment gap, not a pass: those suites verify that a looping WebAssembly plugin cannot block the host, which is a safety property.
+The suites use different assertion and test runners, so their counts are not aggregated. The two WebAssembly suites skip when their compiled fixtures are absent. A skip is an environment gap, not a pass.
 
 ### WebAssembly fixtures
 
