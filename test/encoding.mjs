@@ -78,7 +78,7 @@ def apply(ctx):
     def echo_text(args) -> dict:
         return {"text": args.get("text")}
 
-    @ctx.tools.register(name="noisy_apply", description="Print a non-ASCII diagnostic")
+    @ctx.tools.register(name="noisy_apply", description="Write a non-ASCII line to the detached standard output")
     def noisy_apply(_args) -> dict:
         print("\u4e2d\u6587 diagnostic from the plugin")
         return {"ok": True}
@@ -153,7 +153,7 @@ async function main() {
       check('the request decodes and the reply re-encodes', echoed.value?.text === '\u4e2d\u6587',
         echoed.error ?? JSON.stringify(echoed.value))
 
-      section('2. A stray non-ASCII diagnostic does not break the channel')
+      section('2. A non-ASCII plugin write cannot break the channel')
       const noisy = await call('noisy_apply', {})
       check('the call succeeds', noisy.value?.ok === true, noisy.error ?? JSON.stringify(noisy.value))
       const after = await call('echo_after_noise', {})

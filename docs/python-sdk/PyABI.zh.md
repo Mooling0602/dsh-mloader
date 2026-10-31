@@ -138,7 +138,7 @@ def add(args):
 | --- | --- | --- |
 | `ctx.tools` | `register(name, description, parameters=None, output=None, timeout_ms=None)` | 返回一个装饰器，把处理器记录在 `name` 下。工具载荷见 [ABI-unified](../ABI-unified.zh.md) 第 3.2 节。 |
 | `ctx.on` | `on(event)` 或 `ctx.on(event)` | 返回一个装饰器，把处理器订阅到一个白名单事件。白名单、参数个数规则和 fire-and-forget 规则在同一文档第 3.3 节。 |
-| `ctx.logger` | `debug`、`info`、`warn`、`error`，参数为 `(message, data=None)` | 发送单向通知。从不等待回复，也从不抛异常。 |
+| `ctx.logger` | `debug`、`info`、`warn`、`error`，参数为 `(message, data=None)` | 发送单向通知。从不等待回复，也从不抛异常。它是插件通往加载器日志器的唯一路径，并且清理运行期间仍然可用。 |
 | `ctx.effect` | `register(label, cleanup=None)` | 记录一个在插件销毁时运行的清理函数。清理按注册的逆序运行，一个清理失败不会阻止其余清理。 |
 
 工具处理器接收一个参数，即模型提供的对象。它必须返回可 JSON 序列化的值；声明的 `output` schema 或推导出的 schema 会校验它。事件处理器遵循 [ABI-unified](../ABI-unified.zh.md) 第 3.3 节的参数个数规则：零个参数时不传参数调用，一个参数时传第一个投影参数，多于一个时传所有投影参数。
@@ -176,10 +176,10 @@ def add(args):
 | 调用未知工具 | 回复是 `ok:false`，错误消息会指出该工具。 |
 | 注册被拒绝 | `apply` 里的调用点抛 `PluginCallError`。apply 握手随后失败。 |
 | 插件模块导入失败 | 启动回复是 `ok:false`，带 `import failed: ...`，进程以状态 1 退出。 |
-| 清理函数抛异常 | traceback 写到 `stderr`，其余清理仍然运行。 |
+| 清理函数抛异常 | traceback 写到运行时诊断流，其余清理仍然运行。 |
 | 收到不支持的宿主操作 | 回复 `ok:false`。 |
 
-`stdout` 只属于协议。不是 JSON 的杂散行会被跳过并在 `stderr` 报告。
+插件代码不能写入协议。运行时在加载插件模块之前就分离了进程标准流，第 6.2 节说明插件的写入实际到达哪里。
 
 ## 6. 进程传输与握手
 
@@ -197,9 +197,10 @@ def add(args):
 ### 6.2 标准流
 
 - 每行一个 JSON 帧，UTF-8，以 `\n` 结尾。这不是 LSP 的 `Content-Length` 分帧。
-- `stdout` 是协议通道。诊断写到 `stderr`，加载器把它转发给日志器。
-- 运行时在读写任何帧之前把 `stdin`、`stdout` 和 `stderr` 重新配置为 UTF-8，所以 `PYTHONIOENCODING` 和 locale 不能选择其他编解码器。不是合法 UTF-8 的字节会解码为替换字符，运行时跳过该行；UTF-8 无法承载的字符会写成反斜杠转义，保持帧可解析。
-- `stdout` 上的非协议行会被跳过并在 `stderr` 报告；不会让插件失败。
+- 运行时拥有标准描述符。加载插件模块之前，它把描述符 0、1 和 2 复制为私有流，把原描述符指向空设备，并替换 `sys.stdin`、`sys.stdout`、`sys.stderr` 及其 `__stdin__`、`__stdout__` 和 `__stderr__` 别名。私有 stdout 承载协议帧，私有 stdin 承载宿主请求，私有 stderr 承载加载器以 debug 级别记录的运行时诊断。
+- 插件通过 `print`、`sys.stdout` 和 `sys.stderr`、`logging` 和 `warnings` 模块、分离前捕获的流、`os.write`，以及继承标准描述符的子进程写入空设备。日志内容只能通过 `ctx.logger` 到达加载器。
+- 启动器在运行时复制描述符之前把标准流重新配置为 UTF-8，每个私有流也是 UTF-8。因此 `PYTHONIOENCODING` 和 locale 不能选择其他编解码器。不是合法 UTF-8 的字节会解码为替换字符，运行时跳过该行；UTF-8 无法承载的字符会写成反斜杠转义，保持帧可解析。
+- 这种分离是普通输出的能力边界，不是安全沙箱。插件进程里的刻意代码仍然可以打开文件或终端设备并重新连接描述符；第 6.1 节说明文件系统和网络不受限制。
 
 帧形状、操作载荷和回复规则见 [ABI-unified](../ABI-unified.zh.md) 第 4 节。
 
@@ -241,7 +242,7 @@ sequenceDiagram
 | 进程崩溃，包括 `os._exit()` | 插件的注册被撤销，状态变为 `failed`。dsh 和其他插件继续运行。 |
 | 插件请求非法 | 以 `ok:false` 拒绝，插件可以看到拒绝。 |
 | 帧无法送达 | 请求立即以 `transport` 错误失败，而不是等超时。 |
-| `stdout` 上出现非协议行 | 跳过该行并记录警告。插件继续运行。 |
+| `stdout` 上出现非协议行 | 跳过该行并记录警告。这是对绕过运行时的输出的防御，不是插件输出通道。 |
 | `dispose` 在 1000 ms 内没有回复 | 加载器发送 SIGTERM，最多等 2000 ms，然后发送 SIGKILL。 |
 
 两个截止时间来自清单：`timeouts.startupMs` 覆盖 `boot` 和 `apply`，`timeouts.callMs` 覆盖 `tool.call` 和事件投递。

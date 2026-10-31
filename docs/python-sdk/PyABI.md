@@ -138,7 +138,7 @@ Both styles may be mixed in one plugin. Declared tools are registered first, the
 | --- | --- | --- |
 | `ctx.tools` | `register(name, description, parameters=None, output=None, timeout_ms=None)` | Returns a decorator that records the handler under `name`. The tool payload is specified in [ABI-unified](../ABI-unified.md) section 3.2. |
 | `ctx.on` | `on(event)` or `ctx.on(event)` | Returns a decorator that subscribes the handler to one whitelisted event. The whitelist, the arity rules and the fire-and-forget rule are in section 3.3 of the same document. |
-| `ctx.logger` | `debug`, `info`, `warn`, `error` with `(message, data=None)` | Sends a one-way notification. It never waits for a reply and never raises. |
+| `ctx.logger` | `debug`, `info`, `warn`, `error` with `(message, data=None)` | Sends a one-way notification. It never waits for a reply and never raises. It is the only route from a plugin to the loader logger, and it stays available while a cleanup runs. |
 | `ctx.effect` | `register(label, cleanup=None)` | Records a cleanup that runs when the plugin is disposed. Cleanups run in reverse registration order, and one failing cleanup does not stop the rest. |
 
 A tool handler is called with one argument, the object the model supplied. It must return a JSON serialisable value; the declared `output` schema or the inferred one validates it. An event handler follows the arity rule in [ABI-unified](../ABI-unified.md) section 3.3: zero parameters calls it with no argument, one parameter passes the first projected argument, and more than one passes every projected argument.
@@ -176,10 +176,10 @@ An explicit `output` argument always wins. A plugin that needs a schema the tabl
 | An unknown tool is called | The reply is `ok:false` with an error message naming the tool. |
 | A registration is rejected | The call site inside `apply` raises `PluginCallError`. The apply handshake then fails. |
 | The plugin module fails to import | The boot reply is `ok:false` with `import failed: ...`, and the process exits with status 1. |
-| A cleanup raises | The traceback goes to `stderr` and the remaining cleanups still run. |
+| A cleanup raises | The traceback goes to the runtime diagnostics stream and the remaining cleanups still run. |
 | An unsupported host operation arrives | The reply is `ok:false`. |
 
-`stdout` is the protocol channel only. A stray line that is not JSON is skipped and reported on `stderr`.
+Plugin code cannot write to the protocol. The runtime detaches the process standard streams before the plugin module loads, and section 6.2 states what a plugin write reaches instead.
 
 ## 6. Process transport and handshake
 
@@ -197,9 +197,10 @@ An explicit `output` argument always wins. A plugin that needs a schema the tabl
 ### 6.2 Standard streams
 
 - One JSON frame per line, UTF-8, terminated by `\n`. This is not the LSP `Content-Length` framing.
-- `stdout` is the protocol channel. Diagnostics go to `stderr`, which the loader forwards to its logger.
-- The runtime reconfigures `stdin`, `stdout` and `stderr` to UTF-8 before it reads or writes a frame, so `PYTHONIOENCODING` and the locale cannot select another codec. A byte that is not valid UTF-8 decodes to the replacement character, which leaves a line the runtime skips, and a character UTF-8 cannot carry is written as a backslash escape, which keeps the frame parseable.
-- A non-protocol line on `stdout` is skipped and reported on `stderr`; it does not fail the plugin.
+- The runtime owns the standard descriptors. Before the plugin module loads, it duplicates descriptors 0, 1 and 2 into private streams, points the originals at the null device, and replaces `sys.stdin`, `sys.stdout`, `sys.stderr` and their `__stdin__`, `__stdout__` and `__stderr__` aliases. The private stdout carries protocol frames, the private stdin carries host requests, and the private stderr carries runtime diagnostics that the loader logs at debug level.
+- Plugin code writes to the null device through `print`, `sys.stdout` and `sys.stderr`, the `logging` and `warnings` modules, a stream captured before the detachment, `os.write`, and a child process that inherits a standard descriptor. Log output reaches the loader only through `ctx.logger`.
+- The launcher reconfigures the standard streams to UTF-8 before the runtime duplicates them, and every private stream is UTF-8. `PYTHONIOENCODING` and the locale therefore cannot select another codec. A byte that is not valid UTF-8 decodes to the replacement character, which leaves a line the runtime skips, and a character UTF-8 cannot carry is written as a backslash escape, which keeps a frame parseable.
+- The detachment is a capability boundary for ordinary output, not a security sandbox. Deliberate code in the plugin process can still open files or a terminal device and reconnect descriptors, and the file system and the network remain unrestricted as section 6.1 states.
 
 The frame shapes, the operation payloads and the reply rules are specified in [ABI-unified](../ABI-unified.md) section 4.
 
@@ -241,7 +242,7 @@ The runtime does not validate the manifest. Manifest validation happens during d
 | The process crashes, including `os._exit()` | The plugin's registrations are revoked and its state becomes `failed`. dsh and the other plugins continue. |
 | A plugin request is invalid | It is rejected with `ok:false`, and the plugin can observe the rejection. |
 | A frame cannot be delivered | The request fails immediately with a `transport` error instead of waiting for the timeout. |
-| A non-protocol line appears on `stdout` | The line is skipped and a warning is logged. The plugin keeps running. |
+| A non-protocol line appears on `stdout` | The line is skipped and a warning is logged. This is a defence for output that bypassed the runtime, not a plugin output route. |
 | `dispose` does not answer within 1000 ms | The loader sends SIGTERM, waits at most 2000 ms, then sends SIGKILL. |
 
 The two deadlines come from the manifest: `timeouts.startupMs` covers `boot` and `apply`, and `timeouts.callMs` covers `tool.call` and event delivery.
