@@ -180,8 +180,8 @@ The only subscribable events are:
 - A subscription to an event outside this list is rejected, and the rejection names the whitelist.
 - A plugin may subscribe to each event once. A duplicate subscription is rejected.
 - A subscription is observational. The handler return value does not change the host execution or the tool result, and the host chain advances whether or not the plugin answers.
-- A handler must return promptly and must not wait for the host. The host is delivering the event and is not serving further requests from that plugin, so a synchronous host request from inside a handler deadlocks both sides. Logging is the exception: it is a one-way notification and is safe from inside a handler.
-- Handler arity: zero parameters calls `handler()`, exactly one calls `handler(first)`, and more than one calls `handler(*args)`.
+- A handler must return promptly and must not wait for the host. The host dispatches events asynchronously, but a blocking handler can delay later work in the plugin process. Logging is a one-way notification and is safe from inside a handler.
+- Python handler arity: zero positional parameters calls `handler()`, one receives the first argument if present, and more than one or a variadic positional parameter receives all arguments. Missing required arguments produce a handler error.
 - An event with no subscribed handler is acknowledged with a null result.
 
 ### 3.4 Event payload projection

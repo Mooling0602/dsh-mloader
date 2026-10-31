@@ -14,6 +14,7 @@ registered first.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import sys
 import traceback
 from collections.abc import Callable
@@ -183,7 +184,27 @@ def _handle_host_request(frame: dict[str, Any]) -> None:
             return
         args = payload.get("args") or []
         try:
-            result = handler(*args) if len(args) != 1 else handler(args[0])
+            parameters = inspect.signature(handler).parameters.values()
+            positional = [
+                parameter
+                for parameter in parameters
+                if parameter.kind
+                in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                )
+            ]
+            if any(
+                parameter.kind == inspect.Parameter.VAR_POSITIONAL
+                for parameter in parameters
+            ):
+                result = handler(*args)
+            elif len(positional) == 0:
+                result = handler()
+            elif len(positional) == 1:
+                result = handler(*args[:1])
+            else:
+                result = handler(*args)
             channel.respond(request_id, True, result)
         except Exception as exc:  # noqa: BLE001 - a handler error is a tool error
             channel.respond(request_id, False, error={"message": str(exc)})

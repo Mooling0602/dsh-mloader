@@ -24,10 +24,9 @@ Two rules apply to every handler:
 
 - A handler must return immediately. Event handlers run while the host is busy,
   so a blocking handler slows down every tool call.
-- A handler must not wait for a host request. The host is not reading plugin
-  requests during event dispatch, so a synchronous host request from inside a
-  handler deadlocks both sides. Logging is the exception: it is a one way
-  notification that never waits for a reply.
+- A handler must not wait for a host request. A blocking handler can delay later
+  work in the plugin process. Logging is a one way notification that never
+  waits for a reply.
 """
 
 from dsh_mloader_sdk import Context, plugin

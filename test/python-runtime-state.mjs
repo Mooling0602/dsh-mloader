@@ -50,6 +50,27 @@ class RuntimeStateTest(unittest.TestCase):
         finally:
             state.channel = previous
 
+    def test_event_dispatch_uses_handler_arity(self):
+        class RecordingChannel:
+            def respond(self, request_id, ok, result=None, error=None):
+                self.reply = (request_id, ok, result, error)
+
+        previous_channel, previous_handlers = state.channel, state.event_handlers
+        channel = RecordingChannel()
+        state.channel = channel
+        try:
+            for handler, args, expected in (
+                (lambda: 'zero', [1, 2], 'zero'),
+                (lambda first: first, [1, 2], 1),
+                (lambda first, second: [first, second], [1, 2], [1, 2]),
+                (lambda *values: list(values), [1, 2], [1, 2]),
+            ):
+                state.event_handlers = {'event': handler}
+                _handle_host_request({'id': 1, 'op': 'event', 'payload': {'event': 'event', 'args': args}})
+                self.assertEqual(channel.reply, (1, True, expected, None))
+        finally:
+            state.channel, state.event_handlers = previous_channel, previous_handlers
+
     def test_dispose_requires_a_context(self):
         previous_channel, previous_context = state.channel, state.context
         state.channel, state.context = object(), None
