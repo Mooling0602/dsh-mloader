@@ -87,7 +87,7 @@ async function makePlugin(root, id, { sleepForever = false } = {}) {
     JSON.stringify({ id, name: id, backend: 'python', entry: 'plugin.py', version: '1.0.0' }),
   )
   const body = sleepForever
-    ? `import time\nfrom dsh_mloader_sdk import plugin\n\n@plugin\ndef apply(ctx):\n    ctx.logger.info("sleeping")\n    time.sleep(600)\n`
+    ? `import signal\nimport time\nfrom dsh_mloader_sdk import plugin\n\n@plugin\ndef apply(ctx):\n    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n    ctx.logger.info("sleeping")\n    time.sleep(600)\n`
     : `from dsh_mloader_sdk import plugin\n\n@plugin\ndef apply(ctx):\n    @ctx.tools.register(name="${id.replace(/-/g, '_')}_ping", description="ping", parameters={"type":"object","properties":{},"additionalProperties":False})\n    def ping(args):\n        return {"pong": True}\n`
   await writeFile(join(dir, 'plugin.py'), body)
   return dir
@@ -247,7 +247,7 @@ async function main() {
       uncaught.length = 0
       const plugins = join(tempRoot, 'p4')
       await makePlugin(plugins, 'sleepy', { sleepForever: true })
-      const { fiber } = await mountLoader({
+      const { fiber, logger } = await mountLoader({
         roots: [plugins],
         pythonBin: 'python3',
         profilePlugins: false,
@@ -256,8 +256,7 @@ async function main() {
         statusTool: false,
         command: false,
       })
-      // The plugin is still inside its apply sleep, so boot has not completed.
-      await sleep(800)
+      await waitFor('plugin ignores SIGTERM', () => logger.lines.some((line) => line.includes('sleeping')))
 
       const startedAt = Date.now()
       await fiber.dispose()

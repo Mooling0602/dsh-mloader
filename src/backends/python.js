@@ -191,10 +191,10 @@ export class PythonBackendInstance {
      */
     async #killNow() {
         const child = this.child;
-        if (child === null)
+        if (child === null || child.pid === undefined)
             return;
         try {
-            if (!child.killed)
+            if (child.exitCode === null && child.signalCode === null)
                 child.kill('SIGTERM');
         }
         catch {
@@ -207,13 +207,12 @@ export class PythonBackendInstance {
             }
             const timer = setTimeout(() => {
                 try {
-                    if (!child.killed)
-                        child.kill('SIGKILL');
+                    if (child.exitCode !== null || child.signalCode !== null || !child.kill('SIGKILL'))
+                        resolve();
                 }
                 catch {
-                    // The process already exited.
+                    resolve();
                 }
-                resolve();
             }, 2000);
             timer.unref();
             child.once('exit', () => {

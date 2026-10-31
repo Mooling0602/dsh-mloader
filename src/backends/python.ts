@@ -284,9 +284,9 @@ export class PythonBackendInstance implements BackendInstance {
    */
   async #killNow(): Promise<void> {
     const child = this.child
-    if (child === null) return
+    if (child === null || child.pid === undefined) return
     try {
-      if (!child.killed) child.kill('SIGTERM')
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
     } catch {
       // The process already exited.
     }
@@ -297,11 +297,10 @@ export class PythonBackendInstance implements BackendInstance {
       }
       const timer = setTimeout(() => {
         try {
-          if (!child.killed) child.kill('SIGKILL')
+          if (child.exitCode !== null || child.signalCode !== null || !child.kill('SIGKILL')) resolve()
         } catch {
-          // The process already exited.
+          resolve()
         }
-        resolve()
       }, 2000)
       timer.unref()
       child.once('exit', () => {
