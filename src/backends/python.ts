@@ -605,14 +605,18 @@ export class PythonBackendInstance implements BackendInstance {
   async stop(reason = 'loader dispose'): Promise<void> {
     if (this.stopped) return
     this.stopped = true
-    this.onInboundRequest = null
     this.#failAllPending(new Error(`[${this.spec.id}] stopped: ${reason}`))
     try {
+      // Keep the inbound handler installed until dispose replies. A plugin logs
+      // from its cleanups, and that notification has to reach the loader while
+      // the ledger is already closed.
       await this.#request('dispose', { reason }, 1000)
     } catch {
       // The plugin may already be gone.
+    } finally {
+      this.onInboundRequest = null
     }
-    if (this.child !== null && !this.child.killed) {
+    if (this.child !== null && this.child.exitCode === null && this.child.signalCode === null) {
       try {
         this.child.stdin?.end()
       } catch {

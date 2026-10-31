@@ -101,18 +101,21 @@ export class PluginRegistrar {
      *
      * The operation whitelist is enforced here: an unknown operation is rejected
      * by name with the whitelist in the error, so a plugin can see what the loader
-     * accepts. A request that arrives after disposal rejects instead of creating a
-     * registration nobody would ever revoke.
+     * accepts. A registration that arrives after disposal rejects instead of
+     * creating an entry nobody would ever revoke. A `logger.log` notification is
+     * still accepted because logging creates no registration and a cleanup has to
+     * be able to log while the ledger is already closed.
      *
      * @param op - One of `tools.register`, `events.on`, `logger.log`, `effect.register`.
      * @param payload - Operation arguments.
      * @returns Operation specific acknowledgement sent back to the plugin.
-     * @throws {Error} When the plugin is unloaded, the operation is unknown, or the
-     *   payload violates the contract.
+     * @throws {Error} When a registration arrives after unload, the operation is
+     *   unknown, or the payload violates the contract.
      */
     async handle(op, payload = {}) {
-        if (this.#disposed)
+        if (this.#disposed && op !== 'logger.log') {
             throw new Error(`plugin ${this.spec.id} has been unloaded`);
+        }
         switch (op) {
             case 'tools.register':
                 return this.#registerTool(payload);

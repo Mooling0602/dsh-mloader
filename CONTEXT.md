@@ -352,7 +352,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **The waterfall listener must call `next()` synchronously and return its result.** Cordis waterfall events pass `next` as the last listener argument, and the chain stops at a listener that does not call it. The tool execution body then never runs and the tool result becomes `undefined`.
 - **Plugin dispatch is fire-and-forget and never awaited by the listener.** Awaiting a plugin reply from the listener blocks the host's execution chain on the plugin. The listener starts the dispatch and continues the chain synchronously.
 - **A plugin event handler must not wait for the host.** The host dispatches asynchronously and can handle inbound requests, but a blocking handler can delay later work in the plugin process. Handler work must be short and must not block.
-- **Python logging is a one-way notification.** The Python runtime sends `logger.log` with `notification: true` and does not wait for a reply, so logging is safe from inside an event handler. A synchronous logger request is a deadlock.
+- **Python logging is a one-way notification.** The Python runtime sends `logger.log` with `notification: true` and does not wait for a reply, so logging is safe from inside an event handler and from a cleanup during dispose. The notification does not block on a host reply.
 - **A disposed or disabled plugin still advances the chain.** Its listener calls `next()` and returns the result; it just does not dispatch anything.
 - **An effect registered by a plugin is anchored on the loader's context.** Unloading the loader therefore also runs that plugin's cleanup, not only unloading the plugin itself.
 
@@ -374,7 +374,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **Teardown must abort an in-flight startup.** The loader listens for a fiber state change away from active on `internal/status` and the teardown effect, and calls `abortStartup()`; that fails in-flight requests so the background boot task finishes quickly. Teardown then awaits the boot task and iterates the records again, because boot may have created a record after teardown began.
 - **The abort path must be installed before boot starts.** The `internal/status` listener and the effect that calls `abortStartup()` are registered before the boot task is created. A cleanup registered later cannot run early enough to interrupt a startup that is already waiting.
 - **The active fiber state is not exported as a runtime enum.** Cordis exposes the state only as a number, so the loader compares the literal `2` and keeps that value in one named constant. Do not spell the number out at each use.
-- **Unload ordering is registrations first, backend second.** Disposing the ledger is immediately visible to dsh; stopping the backend may take a moment, and a failing stop is a warning, not a failure of the unload.
+- **Unload ordering is registrations first, backend second.** Disposing the ledger is immediately visible to dsh; stopping the backend may take a moment, and a failing stop is a warning, not a failure of the unload. The backend keeps its inbound handler installed until the dispose reply, and a disposed ledger still accepts `logger.log`, so a cleanup can log while its ledger is already closed.
 - **Reload prints `reloading <id>` and then the mount line, not an unload line.** A reload stops and starts in one step, so a separate unload line would describe something that did not happen.
 
 ### 5.4a Watching the plugin roots
