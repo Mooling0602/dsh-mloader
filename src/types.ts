@@ -98,6 +98,8 @@ export interface CommandDefinition {
 export interface LoaderContext {
   baseUrl?: string
   logger?: LoaderLogger
+  /** Cordis fiber that owns this plugin context; its state drives startup aborts. */
+  fiber?: { state?: number }
   tools: {
     register(definition: ToolDefinition): Disposer
   }

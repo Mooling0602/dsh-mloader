@@ -755,7 +755,12 @@ export async function apply(ctx, config = {}) {
     // Cordis does not export its fiber state enum, so active is the literal 2.
     const FIBER_ACTIVE = 2;
     const onStatus = (fiber, oldState) => {
-        if (oldState !== FIBER_ACTIVE || fiber?.state === FIBER_ACTIVE)
+        // `internal/status` is delivered to every listener, so a sibling fiber
+        // leaving the active state would stop the hosted plugins if it were read
+        // as this loader unloading. Only this fiber's own transition matters.
+        if (fiber !== ctx.fiber)
+            return;
+        if (oldState !== FIBER_ACTIVE || fiber.state === FIBER_ACTIVE)
             return;
         if (manager.disposed)
             return;
