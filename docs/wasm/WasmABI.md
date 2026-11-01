@@ -22,12 +22,13 @@ The core ABI depends on the WebAssembly core specification only. It does not req
 | Export | Signature | Purpose |
 | --- | --- | --- |
 | `memory` | memory | Linear memory used for request and result buffers. |
-| `dsh_alloc` | `(len: i32) -> i32` | Allocate a buffer and return its pointer. |
-| `dsh_free` | `(ptr: i32, len: i32) -> void` | Free a buffer. |
-| `dsh_call` | `(ptr: i32, len: i32) -> i32` | Handle one request and return the result byte length. |
-| `dsh_result_ptr` | `() -> i32` | Return the pointer of the result buffer. |
+| `mloader_alloc` | `(len: i32) -> i32` | Allocate a buffer and return its pointer. |
+| `mloader_free` | `(ptr: i32, len: i32) -> void` | Free a buffer. |
+| `mloader_call` | `(ptr: i32, len: i32) -> i32` | Handle one request and return the result byte length. |
+| `mloader_result_ptr` | `() -> i32` | Return the pointer of the result buffer. |
+| `mloader_abi_version` | `() -> i32` | Report the core ABI version this module implements. |
 
-A module missing any of these exports fails to initialize, and the plugin is marked `failed`.
+The module must report `1`, the core ABI version this host implements. A module missing any of these exports, reporting a non-integer version or reporting any other value fails to initialize, and the plugin is marked `failed`. The manifest has no ABI version field; the export is the authoritative value.
 
 A source-only Rust example that implements these exports lives in `seeds/wasm-mloader/` of the dsh-mloader repository. It is not installed by the loader; build it before use.
 
@@ -35,10 +36,10 @@ The manifest `entry` field names the `.wasm` file, resolved against the manifest
 
 ## 2. Request and result contract
 
-- A request is a UTF-8 JSON object `{"op": "...", "payload": {...}}`. The host allocates `len` bytes with `dsh_alloc`, writes the request, and calls `dsh_call`.
-- The plugin writes its reply as UTF-8 JSON text into its result buffer and returns the byte length from `dsh_call`. The host reads the result at `dsh_result_ptr()`.
+- A request is a UTF-8 JSON object `{"op": "...", "payload": {...}}`. The host allocates `len` bytes with `mloader_alloc`, writes the request, and calls `mloader_call`.
+- The plugin writes its reply as UTF-8 JSON text into its result buffer and returns the byte length from `mloader_call`. The host reads the result at `mloader_result_ptr()`.
 - The plugin must write either `{"ok": true, "result": ...}` or `{"ok": false, "error": {"message": "..."}}`. A reply whose `ok` is `false` fails the call, and a reply that is not valid JSON also fails it.
-- The host calls `dsh_free(ptr, len)` for the request buffer after `dsh_call` returns. The result buffer is owned by the plugin and must remain valid until the next request.
+- The host calls `mloader_free(ptr, len)` for the request buffer after `mloader_call` returns. The result buffer is owned by the plugin and must remain valid until the next request.
 - Invalid JSON in the reply fails the call and does not crash the host.
 
 The operations and payload shapes are the shared ones in [ABI-unified](../ABI-unified.md) section 4.2. The WebAssembly backend uses three of them:
@@ -77,7 +78,7 @@ WASI is not part of the supported contract.
 ## 5. Worker isolation and deadlines
 
 - The module never runs on the host main thread. V8 has no fuel metering and no API to interrupt WebAssembly execution, so a synchronous call with an infinite loop would freeze the main thread permanently, including the timeout timer. Every instance runs in a `worker_threads` worker.
-- The host starts the worker, and the worker compiles and instantiates the module, checks the required exports, calls `_start` when WASI provides one, and then posts `ready`. A failure posts `init-error` and the plugin is marked `failed`. Startup succeeds only on `ready`.
+- The host starts the worker, and the worker compiles and instantiates the module, checks the required exports, checks `mloader_abi_version` against the version the host implements, calls `_start` when WASI provides one, and then posts `ready`. A failure posts `init-error` and the plugin is marked `failed`. Startup succeeds only on `ready`.
 - Module initialization has no deadline of its own. A module whose `_start` never returns never posts `ready`, and the plugin stays `loaded` until it is unloaded or dsh restarts. The worker can still be terminated, so a looping initializer does not block the host thread.
 - The worker runs with `resourceLimits.maxOldGenerationSizeMb` set to 256 MB.
 - The apply handshake uses the manifest `timeouts.startupMs`, and each `tool.call` or `event` delivery uses `timeouts.callMs`. On expiry the host terminates the worker, because terminating it is the only mechanism that stops a looping instance. A timed out call therefore ends the plugin's instance, unlike the Python backend, where the process stays alive.

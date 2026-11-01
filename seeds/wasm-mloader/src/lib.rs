@@ -1,8 +1,11 @@
 //! Source-only WebAssembly example plugin for dsh-mloader.
 //!
-//! The module implements the five core exports documented in
+//! The module implements the six core exports documented in
 //! `docs/wasm/WasmABI.md` and exchanges JSON through linear memory. It does not
 //! import WASI and does not call back into the host.
+//!
+//! The `mloader_abi_version` export reports the core ABI version this module
+//! targets; the host rejects a module that reports a version it does not support.
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::sync::Mutex;
@@ -27,9 +30,15 @@ struct ToolCall {
 /// Result buffer owned by the plugin and valid until the next request.
 static RESULT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
+/// Report the core ABI version this module implements.
+#[no_mangle]
+pub extern "C" fn mloader_abi_version() -> u32 {
+    1
+}
+
 /// Allocate a request buffer for the host.
 #[no_mangle]
-pub extern "C" fn dsh_alloc(len: u32) -> u32 {
+pub extern "C" fn mloader_alloc(len: u32) -> u32 {
     if len == 0 {
         return 0;
     }
@@ -39,9 +48,9 @@ pub extern "C" fn dsh_alloc(len: u32) -> u32 {
     unsafe { alloc(layout) as u32 }
 }
 
-/// Release a request buffer allocated by `dsh_alloc`.
+/// Release a request buffer allocated by `mloader_alloc`.
 #[no_mangle]
-pub extern "C" fn dsh_free(ptr: u32, len: u32) {
+pub extern "C" fn mloader_free(ptr: u32, len: u32) {
     if ptr == 0 || len == 0 {
         return;
     }
@@ -53,7 +62,7 @@ pub extern "C" fn dsh_free(ptr: u32, len: u32) {
 
 /// Return the pointer of the current result buffer.
 #[no_mangle]
-pub extern "C" fn dsh_result_ptr() -> u32 {
+pub extern "C" fn mloader_result_ptr() -> u32 {
     let result = RESULT.lock().expect("result mutex poisoned");
     if result.is_empty() {
         0
@@ -64,7 +73,7 @@ pub extern "C" fn dsh_result_ptr() -> u32 {
 
 /// Handle one request and return the length of the result buffer.
 #[no_mangle]
-pub extern "C" fn dsh_call(ptr: u32, len: u32) -> u32 {
+pub extern "C" fn mloader_call(ptr: u32, len: u32) -> u32 {
     let request = if ptr == 0 || len == 0 {
         &[]
     } else {

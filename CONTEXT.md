@@ -236,6 +236,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `edge-cases.mjs` | schema pre-validation, event whitelist, crash isolation, unload cleanup | no |
 | `dual-backend.mjs` | Python and WebAssembly plugins in one loader, using the built `seeds/wasm-mloader` example | yes, otherwise skips |
 | `wasm-safety.mjs` | a looping WebAssembly plugin does not block the host thread | yes, otherwise skips |
+| `wasm-abi.mjs` | in-memory modules: ABI version 1 is accepted, a mismatched version and a missing version export are rejected | no |
 | `waterfall.mjs` | tool execution chain is not blocked by event listeners | no |
 | `reentrancy.mjs` | a real Python subprocess survives reentrant event delivery | no |
 | `exec-payload.mjs` | host exec objects cross the process boundary safely; tools stay usable after a dirty payload | no |
@@ -261,11 +262,11 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `python-logging.mjs` | standard stream isolation: every direct output route is discarded, stdin is detached, and only `ctx.logger` reaches the loader logger, including from a cleanup | no |
 | `python-sdk-scripts.mjs` | Python SDK maintenance scripts and virtual environment exclusion | no |
 
-The suites use different assertion and test runners, so their counts are not aggregated. The two WebAssembly suites skip when their compiled fixtures are absent. A skip is an environment gap, not a pass.
+The suites use different assertion and test runners, so their counts are not aggregated. The WebAssembly suites skip when their compiled fixtures are absent, except `wasm-abi.mjs`, which builds its modules in memory and always runs. A skip is an environment gap, not a pass.
 
 ### WebAssembly fixtures
 
-`.wasm` files are not committed (see `.gitignore`). Compile the two fixtures before running the WebAssembly suites:
+`.wasm` files are not committed (see `.gitignore`). Compile the two fixtures before running the suites that need them; `wasm-abi.mjs` builds its modules in memory and needs no fixture:
 
 ```bash
 ./seeds/wasm-mloader/build.sh
@@ -423,6 +424,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **WebAssembly code never runs on the host main thread.** V8 has no fuel metering and no API to interrupt WebAssembly execution, so a synchronous call with an infinite loop freezes the main thread permanently, including the timeout timer. Every instance runs in a `worker_threads` worker, and the host kills the worker on timeout.
 - **The timeout path terminates the worker.** `worker.terminate()` is the only mechanism that actually stops a looping instance. The timeout clears the worker handle before terminating, so a late reply cannot resolve a call that already failed.
 - **Worker failure fails the calls that are pending.** A missing required export fails initialization through the `init-error` reply, and a worker exit rejects every pending call. `stop()` terminates the worker.
+- **The WebAssembly ABI version is self described.** The core exports are `memory`, `mloader_alloc`, `mloader_free`, `mloader_call`, `mloader_result_ptr` and `mloader_abi_version`. The worker checks the reported version after the required-export check and before `_start`, so a module built for another ABI shape never runs initialization code. The manifest carries no version field; the export is the authoritative value.
 - **The worker handshake is `ready` or `init-error`.** The host resolves startup only on `ready`, so a module that fails to compile or instantiate becomes a failed plugin rather than a hung startup.
 - **The worker has a memory limit.** `resourceLimits.maxOldGenerationSizeMb` is set to 256 MB.
 - **The worker cannot call back into the host synchronously**, because a host import cannot return across threads. The v1 protocol is declaration based, so this costs no capability.

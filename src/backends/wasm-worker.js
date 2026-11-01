@@ -17,7 +17,16 @@
 import { readFileSync } from 'node:fs';
 import { parentPort, workerData } from 'node:worker_threads';
 /** Exports the core ABI requires every module to provide. */
-const REQUIRED_EXPORTS = ['memory', 'dsh_alloc', 'dsh_free', 'dsh_call', 'dsh_result_ptr'];
+const REQUIRED_EXPORTS = [
+    'memory',
+    'mloader_alloc',
+    'mloader_free',
+    'mloader_call',
+    'mloader_result_ptr',
+    'mloader_abi_version',
+];
+/** Core ABI version this host implements; a module reports its own through `mloader_abi_version`. */
+const SUPPORTED_ABI_VERSION = 1;
 /** Namespace of the optional WASI imports. */
 const WASI_NAMESPACE = 'wasi_snapshot_preview1';
 let pluginExports = null;
@@ -61,6 +70,13 @@ async function init() {
     if (missing.length > 0) {
         throw new Error(`wasm module missing required exports: ${missing.join(', ')}`);
     }
+    // The version check runs before `_start`, so a module written against a
+    // different ABI shape never executes initialization code on this host.
+    const version = exports_.mloader_abi_version();
+    if (!Number.isInteger(version) || version !== SUPPORTED_ABI_VERSION) {
+        throw new Error(`wasm module reports ABI version ${String(version)}, `
+            + `but this host supports ${SUPPORTED_ABI_VERSION}`);
+    }
     // A Go wasip1 command calls proc_exit after _start, so later calls are
     // outside the supported behavior; the reactor shape is the supported one.
     if (wasi !== null && typeof exports_._start === 'function') {
@@ -76,7 +92,7 @@ async function init() {
  * @param op - Operation name.
  * @param payload - Operation payload.
  * @returns JSON text the plugin returned, or an empty string for no result.
- * @throws {Error} When the module is not initialized or `dsh_call` throws.
+ * @throws {Error} When the module is not initialized or `mloader_call` throws.
  */
 function invoke(op, payload) {
     const exports_ = pluginExports;
@@ -84,17 +100,17 @@ function invoke(op, payload) {
         throw new Error('wasm module is not initialized');
     const request = JSON.stringify({ op, payload });
     const bytes = new TextEncoder().encode(request);
-    const requestPtr = exports_.dsh_alloc(bytes.byteLength);
+    const requestPtr = exports_.mloader_alloc(bytes.byteLength);
     new Uint8Array(exports_.memory.buffer, requestPtr, bytes.byteLength).set(bytes);
-    const resultLength = exports_.dsh_call(requestPtr, bytes.byteLength);
-    const resultPtr = exports_.dsh_result_ptr();
+    const resultLength = exports_.mloader_call(requestPtr, bytes.byteLength);
+    const resultPtr = exports_.mloader_result_ptr();
     let text = '';
     if (resultLength > 0) {
         const view = new Uint8Array(exports_.memory.buffer, resultPtr, resultLength);
         text = new TextDecoder().decode(view);
     }
     try {
-        exports_.dsh_free(requestPtr, bytes.byteLength);
+        exports_.mloader_free(requestPtr, bytes.byteLength);
     }
     catch {
         // A failed free does not invalidate the result already read.

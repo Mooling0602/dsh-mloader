@@ -22,12 +22,13 @@
 | 导出 | 签名 | 用途 |
 | --- | --- | --- |
 | `memory` | memory | 用于请求和结果缓冲区的线性内存。 |
-| `dsh_alloc` | `(len: i32) -> i32` | 分配缓冲区并返回指针。 |
-| `dsh_free` | `(ptr: i32, len: i32) -> void` | 释放缓冲区。 |
-| `dsh_call` | `(ptr: i32, len: i32) -> i32` | 处理一个请求并返回结果字节长度。 |
-| `dsh_result_ptr` | `() -> i32` | 返回结果缓冲区的指针。 |
+| `mloader_alloc` | `(len: i32) -> i32` | 分配缓冲区并返回指针。 |
+| `mloader_free` | `(ptr: i32, len: i32) -> void` | 释放缓冲区。 |
+| `mloader_call` | `(ptr: i32, len: i32) -> i32` | 处理一个请求并返回结果字节长度。 |
+| `mloader_result_ptr` | `() -> i32` | 返回结果缓冲区的指针。 |
+| `mloader_abi_version` | `() -> i32` | 报告本模块实现的核心 ABI 版本。 |
 
-缺少任何一个导出的模块都无法初始化，插件会被标记为 `failed`。
+模块必须报告 `1`，即本宿主实现的核心 ABI 版本。缺少任何一个导出、报告非整数版本或报告其他值的模块都无法初始化，插件会被标记为 `failed`。清单没有 ABI 版本字段，导出是权威值。
 
 实现这些导出的只含源码的 Rust 示例位于 dsh-mloader 仓库的 `seeds/wasm-mloader/`。加载器不会安装它，使用前需要自行构建。
 
@@ -35,10 +36,10 @@
 
 ## 2. 请求与结果约定
 
-- 请求是 UTF-8 JSON 对象 `{"op": "...", "payload": {...}}`。宿主用 `dsh_alloc` 分配 `len` 字节，写入请求，然后调用 `dsh_call`。
-- 插件把回复写成 UTF-8 JSON 文本放进结果缓冲区，并从 `dsh_call` 返回字节长度。宿主从 `dsh_result_ptr()` 读取结果。
+- 请求是 UTF-8 JSON 对象 `{"op": "...", "payload": {...}}`。宿主用 `mloader_alloc` 分配 `len` 字节，写入请求，然后调用 `mloader_call`。
+- 插件把回复写成 UTF-8 JSON 文本放进结果缓冲区，并从 `mloader_call` 返回字节长度。宿主从 `mloader_result_ptr()` 读取结果。
 - 插件必须写 `{"ok": true, "result": ...}` 或 `{"ok": false, "error": {"message": "..."}}` 之一。`ok` 为 `false` 的回复会让调用失败，不是合法 JSON 的回复也会让调用失败。
-- 宿主在 `dsh_call` 返回后对请求缓冲区调用 `dsh_free(ptr, len)`。结果缓冲区归插件所有，必须保持有效直到下一个请求。
+- 宿主在 `mloader_call` 返回后对请求缓冲区调用 `mloader_free(ptr, len)`。结果缓冲区归插件所有，必须保持有效直到下一个请求。
 - 回复里的 JSON 无效会让调用失败，不会让宿主崩溃。
 
 操作和载荷形状是 [ABI-unified](../ABI-unified.zh.md) 第 4.2 节规定的共享形状。WebAssembly 后端使用其中三个：
@@ -77,7 +78,7 @@ WASI 不属于受支持的契约。
 ## 5. worker 隔离与截止时间
 
 - 模块永远不在宿主主线程上运行。V8 没有 fuel 计量，也没有中断 WebAssembly 执行的 API，所以带无限循环的同步调用会让主线程永久冻结，连超时计时器也一起冻结。每个实例都运行在 `worker_threads` worker 里。
-- 宿主启动 worker，worker 编译并实例化模块，检查必需导出，在 WASI 提供 `_start` 时调用它，然后发送 `ready`。失败时发送 `init-error`，插件被标记为 `failed`。只有 `ready` 代表启动成功。
+- 宿主启动 worker，worker 编译并实例化模块，检查必需导出，校验 `mloader_abi_version` 是否与本宿主实现的版本一致，在 WASI 提供 `_start` 时调用它，然后发送 `ready`。失败时发送 `init-error`，插件被标记为 `failed`。只有 `ready` 代表启动成功。
 - 模块初始化没有自己的截止时间。`_start` 永不返回的模块永远不会发送 `ready`，插件会一直停在 `loaded`，直到被卸载或 dsh 重启。worker 仍然可以被终止，所以死循环的初始化不会阻塞宿主线程。
 - worker 以 `resourceLimits.maxOldGenerationSizeMb` 为 256 MB 运行。
 - apply 握手使用清单的 `timeouts.startupMs`，每次 `tool.call` 或 `event` 投递使用 `timeouts.callMs`。超时后宿主终止 worker，因为终止是停止死循环实例的唯一机制。因此超时的调用会结束插件实例，这一点与 Python 后端不同，后者进程会继续存活。

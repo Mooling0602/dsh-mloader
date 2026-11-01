@@ -32,7 +32,7 @@ The loader watches the plugin root and mounts the directory. If watching is disa
 
 ## What the example demonstrates
 
-- The core WebAssembly ABI exports: `memory`, `dsh_alloc`, `dsh_free`, `dsh_call` and `dsh_result_ptr`.
+- The core WebAssembly ABI exports: `memory`, `mloader_alloc`, `mloader_free`, `mloader_call`, `mloader_result_ptr` and `mloader_abi_version`.
 - The declaration and JSON request contract for `apply`, `tool.call` and `event`.
 - Two tools, `wasm_add` and `wasm_upper`.
 
