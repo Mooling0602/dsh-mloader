@@ -119,18 +119,19 @@ function name(text) {
 const I32 = 0x7f
 
 /**
- * Build a minimal WASI reactor module that satisfies the core ABI.
+ * Build a minimal reactor module that satisfies the core ABI.
  *
- * The module imports `fd_write` so the worker instantiates a WASI provider, and
- * it exports `_initialize` instead of `_start`. Initialization stores the
- * requested ABI version at address 0, and `mloader_abi_version` returns the
- * stored value, so the returned version is observable only when the host
- * initialized the module before the version check.
+ * The module exports `_initialize` instead of `_start`, and it imports
+ * `fd_write` only when requested, so the same builder covers a WASI reactor and
+ * a reactor without WASI imports. Initialization stores the requested ABI
+ * version at address 0, and `mloader_abi_version` returns the stored value, so
+ * the returned version is observable only when the host initialized the module
+ * before the version check.
  *
- * @param options - Initialization and reply options.
+ * @param options - Initialization and import options.
  * @returns Compiled module bytes.
  */
-function buildReactorModule({ versionAfterInitialize = 1 } = {}) {
+function buildReactorModule({ versionAfterInitialize = 1, includeWasiImport = true } = {}) {
   const declaration = '{"ok":true,"result":{"tools":[],"events":[]}}'
   const declarationBytes = [...new TextEncoder().encode(declaration)]
 
@@ -159,16 +160,17 @@ function buildReactorModule({ versionAfterInitialize = 1 } = {}) {
     0x00,
     ...uleb(5),
   ]
+  const importCount = includeWasiImport ? 1 : 0
 
-  // The imported fd_write takes function index 0, so the defined functions
-  // start at index 1.
+  // A WASI reactor imports fd_write first, so its defined functions start at
+  // index 1. A reactor without imports starts at index 0.
   const exportedFunctions = [
-    ['mloader_alloc', 1],
-    ['mloader_free', 2],
-    ['mloader_call', 3],
-    ['mloader_result_ptr', 4],
-    ['mloader_abi_version', 5],
-    ['_initialize', 6],
+    ['mloader_alloc', importCount],
+    ['mloader_free', importCount + 1],
+    ['mloader_call', importCount + 2],
+    ['mloader_result_ptr', importCount + 3],
+    ['mloader_abi_version', importCount + 4],
+    ['_initialize', importCount + 5],
   ]
   const exportEntries = [
     [...name('memory'), 0x02, ...uleb(0)],
@@ -185,10 +187,12 @@ function buildReactorModule({ versionAfterInitialize = 1 } = {}) {
     return [...uleb(entry.length), ...entry]
   }))
 
+  const importSection = includeWasiImport ? sectionBytes(2, vec([imported])) : []
+
   return new Uint8Array([
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
     ...sectionBytes(1, vec(types)),
-    ...sectionBytes(2, vec([imported])),
+    ...importSection,
     ...sectionBytes(3, vec(functionTypes.map((index) => [index]))),
     ...sectionBytes(5, vec([[0x00, ...uleb(1)]])),
     ...sectionBytes(7, vec(exportEntries)),
@@ -264,6 +268,10 @@ async function main() {
     /ABI version 2/.test(rejected?.error ?? '') && /supports 1/.test(rejected?.error ?? ''),
     rejected?.error,
   )
+
+  section('3. A reactor without WASI imports is initialized directly')
+  const plain = await runCase('reactor-plain', buildReactorModule({ versionAfterInitialize: 1, includeWasiImport: false }))
+  check('the module is applied', plain?.state === 'applied', JSON.stringify(plain))
 
   if (failures.length === 0) {
     console.log('\nAll passed: ' + passed + ' assertions')

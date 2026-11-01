@@ -73,7 +73,8 @@ WASI reactor 模块还会导出 `_initialize`，worker 会在版本检查之前�
 WASI 不属于受支持的契约。
 
 - 导入 `wasi_snapshot_preview1` 的模块会用最小的 preview1 提供者实例化：没有预打开目录，没有环境变量，没有参数，退出处理不会终止宿主。
-- worker 支持两种 WASI 启动形态。命令模块导出 `_start`，它在初始化时运行一次，可能调用 `proc_exit`。reactor 模块导出 `_initialize`，宿主会在 ABI 版本检查之前、以及任何其他导出函数之前调用它。
+- worker 支持两种启动形态。命令模块导出 `_start`，它在初始化时运行一次，可能调用 `proc_exit`。reactor 模块导出 `_initialize`，宿主会在 ABI 版本检查之前、以及任何其他导出函数之前调用它。
+- reactor 钩子不专属于 WASI。导入 WASI 的模块通过 WASI 提供者初始化，没有导入的模块则直接调用 `_initialize`。面向 `wasm32-wasip1` 构建的 libc 模块属于第二种。
 - reactor 运行时可能在其导出函数先于 `_initialize` 运行时陷入 trap。用 `-buildmode=c-shared` 和 `//go:wasmexport` 构建的 Go `wasip1` 模块就是 reactor，需要走 reactor 路径。
 - Go `wasip1` 命令模块使用命令模型：`_start` 可能调用 `proc_exit`，所以初始化之后再调用属于不受支持的行为。
 - 不导入任何 WASI 函数的模块不需要启动形态。面向 `wasm32-unknown-unknown` 构建的 Rust、C 或 Zig 直接导出核心 ABI。
@@ -82,7 +83,7 @@ WASI 不属于受支持的契约。
 ## 5. worker 隔离与截止时间
 
 - 模块永远不在宿主主线程上运行。V8 没有 fuel 计量，也没有中断 WebAssembly 执行的 API，所以带无限循环的同步调用会让主线程永久冻结，连超时计时器也一起冻结。每个实例都运行在 `worker_threads` worker 里。
-- 宿主启动 worker，worker 编译并实例化模块，然后检查必需导出。WASI reactor 接着通过 `_initialize` 初始化，版本检查在初始化之后运行，因为 reactor 运行时在其导出函数先于初始化运行时会陷入 trap。WASI 命令模块的版本检查在 `_start` 之前，这样针对其他 ABI 形态编写的模块永远不会执行初始化代码。不导入 WASI 函数的模块直接做版本检查。之后 worker 发送 `ready`。失败时发送 `init-error`，插件被标记为 `failed`。只有 `ready` 代表启动成功。
+- 宿主启动 worker，worker 编译并实例化模块，然后检查必需导出。reactor 接着通过 `_initialize` 初始化，导入 WASI 时经由 WASI 提供者，没有导入时直接调用；版本检查在初始化之后运行，因为 reactor 运行时在其导出函数先于初始化运行时会陷入 trap。命令模块的版本检查在 `_start` 之前，这样针对其他 ABI 形态编写的模块永远不会执行初始化代码。之后 worker 发送 `ready`。失败时发送 `init-error`，插件被标记为 `failed`。只有 `ready` 代表启动成功。
 - 模块初始化没有自己的截止时间。`_start` 或 `_initialize` 永不返回的模块永远不会发送 `ready`，插件会一直停在 `loaded`，直到被卸载或 dsh 重启。worker 仍然可以被终止，所以死循环的初始化不会阻塞宿主线程。
 - worker 以 `resourceLimits.maxOldGenerationSizeMb` 为 256 MB 运行。
 - apply 握手使用清单的 `timeouts.startupMs`，每次 `tool.call` 或 `event` 投递使用 `timeouts.callMs`。超时后宿主终止 worker，因为终止是停止死循环实例的唯一机制。因此超时的调用会结束插件实例，这一点与 Python 后端不同，后者进程会继续存活。

@@ -91,11 +91,13 @@ function messageOf(error: unknown): string {
  * A module that imports the WASI preview1 namespace is instantiated with a
  * minimal provider: no preopened directories, no environment and no arguments.
  *
- * The worker supports the WASI command and reactor shapes. A command module
- * exports `_start`, which runs once for initialization. A reactor module
- * exports `_initialize`, which runs before the version check and before any
- * other exported function, because a reactor runtime such as Go traps when one
- * of its exports runs before initialization.
+ * The worker supports the command and reactor shapes. A command module exports
+ * `_start`, which runs once for initialization. A reactor module exports
+ * `_initialize`, which runs before the version check and before any other
+ * exported function, because a reactor runtime such as Go traps when one of its
+ * exports runs before initialization. The hook is not WASI specific: a module
+ * without WASI imports gets it called directly, and a module with WASI imports
+ * gets it called through the WASI provider.
  *
  * @throws {Error} When the file cannot be read, the module fails to compile or
  *   instantiate, a required export is missing, or the reported ABI version is
@@ -133,19 +135,25 @@ async function init(): Promise<void> {
     throw new Error(`wasm module missing required exports: ${missing.join(', ')}`)
   }
 
-  if (wasi === null) {
+  // A reactor must be initialized before any exported function runs,
+  // including the version export: a reactor runtime such as Go traps when an
+  // export is called first. The hook is not WASI specific, because a libc based
+  // module can export it without importing WASI. The version check therefore
+  // runs after initialization for this shape, because the module cannot report
+  // its version before its runtime exists. The module is sandboxed, so
+  // initialization has no capability to use and the check still fails the
+  // plugin when the version does not match.
+  if (typeof exports_._initialize === 'function') {
+    if (wasi === null) {
+      exports_._initialize()
+    } else {
+      wasi.initialize(instance)
+    }
     checkVersion(exports_)
     return
   }
 
-  // A WASI reactor must be initialized before any exported function runs,
-  // including the version export: a Go reactor traps when an export is called
-  // first. The version check therefore runs after initialization for this
-  // shape, because the module cannot report its version before its runtime
-  // exists. The module is sandboxed, so initialization has no capability to
-  // use and the check still fails the plugin when the version does not match.
-  if (typeof exports_._initialize === 'function') {
-    wasi.initialize(instance)
+  if (wasi === null) {
     checkVersion(exports_)
     return
   }
