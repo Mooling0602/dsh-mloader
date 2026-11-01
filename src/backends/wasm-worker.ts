@@ -48,7 +48,7 @@ interface WasmMemory {
   buffer: ArrayBuffer
 }
 
-/** The six exports the core ABI requires, plus the optional WASI entry. */
+/** The six exports the core ABI requires, plus the optional WASI entries. */
 interface PluginExports {
   memory: WasmMemory
   mloader_alloc(length: number): number
@@ -56,6 +56,7 @@ interface PluginExports {
   mloader_call(ptr: number, length: number): number
   mloader_result_ptr(): number
   mloader_abi_version(): number
+  _initialize?: () => void
   _start?: () => void
 }
 
@@ -89,10 +90,16 @@ function messageOf(error: unknown): string {
  *
  * A module that imports the WASI preview1 namespace is instantiated with a
  * minimal provider: no preopened directories, no environment and no arguments.
- * Its `_start` export, if any, is called once for initialization.
+ *
+ * The worker supports the WASI command and reactor shapes. A command module
+ * exports `_start`, which runs once for initialization. A reactor module
+ * exports `_initialize`, which runs before the version check and before any
+ * other exported function, because a reactor runtime such as Go traps when one
+ * of its exports runs before initialization.
  *
  * @throws {Error} When the file cannot be read, the module fails to compile or
- *   instantiate, or a required export is missing.
+ *   instantiate, a required export is missing, or the reported ABI version is
+ *   not supported.
  */
 async function init(): Promise<void> {
   const { entry } = workerData as { entry: string }
@@ -126,20 +133,47 @@ async function init(): Promise<void> {
     throw new Error(`wasm module missing required exports: ${missing.join(', ')}`)
   }
 
-  // The version check runs before `_start`, so a module written against a
-  // different ABI shape never executes initialization code on this host.
+  if (wasi === null) {
+    checkVersion(exports_)
+    return
+  }
+
+  // A WASI reactor must be initialized before any exported function runs,
+  // including the version export: a Go reactor traps when an export is called
+  // first. The version check therefore runs after initialization for this
+  // shape, because the module cannot report its version before its runtime
+  // exists. The module is sandboxed, so initialization has no capability to
+  // use and the check still fails the plugin when the version does not match.
+  if (typeof exports_._initialize === 'function') {
+    wasi.initialize(instance)
+    checkVersion(exports_)
+    return
+  }
+
+  // A WASI command module keeps the version check before `_start`, so a module
+  // written against a different ABI shape never executes initialization code.
+  checkVersion(exports_)
+  // A Go wasip1 command calls proc_exit after _start, so later calls are
+  // outside the supported behavior; the reactor shape is the supported one.
+  if (typeof exports_._start === 'function') {
+    wasi.start(instance)
+  }
+}
+
+/**
+ * Check the core ABI version the module reports.
+ *
+ * @param exports_ - Instance exports.
+ * @throws {Error} When the version is not an integer or differs from the
+ *   version this host implements.
+ */
+function checkVersion(exports_: PluginExports): void {
   const version = exports_.mloader_abi_version()
   if (!Number.isInteger(version) || version !== SUPPORTED_ABI_VERSION) {
     throw new Error(
       `wasm module reports ABI version ${String(version)}, `
       + `but this host supports ${SUPPORTED_ABI_VERSION}`,
     )
-  }
-
-  // A Go wasip1 command calls proc_exit after _start, so later calls are
-  // outside the supported behavior; the reactor shape is the supported one.
-  if (wasi !== null && typeof exports_._start === 'function') {
-    wasi.start(instance)
   }
 }
 

@@ -237,6 +237,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `dual-backend.mjs` | Python and WebAssembly plugins in one loader, using the built `seeds/wasm-mloader` example | yes, otherwise skips |
 | `wasm-safety.mjs` | a looping WebAssembly plugin does not block the host thread | yes, otherwise skips |
 | `wasm-abi.mjs` | in-memory modules: ABI version 1 is accepted, a mismatched version and a missing version export are rejected | no |
+| `wasm-reactor.mjs` | in-memory WASI reactor: `_initialize` runs before the version check, and the version check still rejects a mismatched version after initialization | no |
 | `waterfall.mjs` | tool execution chain is not blocked by event listeners | no |
 | `reentrancy.mjs` | a real Python subprocess survives reentrant event delivery | no |
 | `exec-payload.mjs` | host exec objects cross the process boundary safely; tools stay usable after a dirty payload | no |
@@ -262,18 +263,18 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `python-logging.mjs` | standard stream isolation: every direct output route is discarded, stdin is detached, and only `ctx.logger` reaches the loader logger, including from a cleanup | no |
 | `python-sdk-scripts.mjs` | Python SDK maintenance scripts and virtual environment exclusion | no |
 
-The suites use different assertion and test runners, so their counts are not aggregated. The WebAssembly suites skip when their compiled fixtures are absent, except `wasm-abi.mjs`, which builds its modules in memory and always runs. A skip is an environment gap, not a pass.
+The suites use different assertion and test runners, so their counts are not aggregated. The WebAssembly suites skip when their compiled fixtures are absent, except `wasm-abi.mjs` and `wasm-reactor.mjs`, which build their modules in memory and always run. A skip is an environment gap, not a pass.
 
 ### WebAssembly fixtures
 
-`.wasm` files are not committed (see `.gitignore`). Compile the two fixtures before running the suites that need them; `wasm-abi.mjs` builds its modules in memory and needs no fixture:
+`.wasm` files are not committed (see `.gitignore`). Compile the two fixtures before running the suites that need them; `wasm-abi.mjs` and `wasm-reactor.mjs` build their modules in memory and need no fixture:
 
 ```bash
 ./seeds/wasm-mloader/build.sh
-cd test/fixtures/wasm-loop && GOOS=wasip1 GOARCH=wasm go build -o loop.wasm .
+cd test/fixtures/wasm-loop && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o loop.wasm .
 ```
 
-The WebAssembly example in `dual-backend.mjs` is the compiled `seeds/wasm-mloader` example; build it with `./seeds/wasm-mloader/build.sh` (Rust `wasm32-unknown-unknown` target and a working wasm linker required). The loop fixture still uses Go. `dual-backend.mjs` and `wasm-safety.mjs` skip cleanly when the binaries are missing. A skipped suite means the property it asserts is unverified in that environment, not that it passed.
+The WebAssembly example in `dual-backend.mjs` is the compiled `seeds/wasm-mloader` example; build it with `./seeds/wasm-mloader/build.sh` (Rust `wasm32-unknown-unknown` target and a working wasm linker required). The loop fixture is a Go `wasip1` reactor built with `-buildmode=c-shared`. `dual-backend.mjs` and `wasm-safety.mjs` skip cleanly when the binaries are missing. A skipped suite means the property it asserts is unverified in that environment, not that it passed.
 
 ### Prepare the Python SDK copy for a release
 
@@ -424,7 +425,8 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **WebAssembly code never runs on the host main thread.** V8 has no fuel metering and no API to interrupt WebAssembly execution, so a synchronous call with an infinite loop freezes the main thread permanently, including the timeout timer. Every instance runs in a `worker_threads` worker, and the host kills the worker on timeout.
 - **The timeout path terminates the worker.** `worker.terminate()` is the only mechanism that actually stops a looping instance. The timeout clears the worker handle before terminating, so a late reply cannot resolve a call that already failed.
 - **Worker failure fails the calls that are pending.** A missing required export fails initialization through the `init-error` reply, and a worker exit rejects every pending call. `stop()` terminates the worker.
-- **The WebAssembly ABI version is self described.** The core exports are `memory`, `mloader_alloc`, `mloader_free`, `mloader_call`, `mloader_result_ptr` and `mloader_abi_version`. The worker checks the reported version after the required-export check and before `_start`, so a module built for another ABI shape never runs initialization code. The manifest carries no version field; the export is the authoritative value.
+- **The WebAssembly ABI version is self described.** The core exports are `memory`, `mloader_alloc`, `mloader_free`, `mloader_call`, `mloader_result_ptr` and `mloader_abi_version`. The version check runs after the required-export check. For a WASI command module it runs before `_start`, so a module built for another ABI shape never runs initialization code. The manifest carries no version field; the export is the authoritative value.
+- **A WASI reactor is initialized before the version check.** A reactor exports `_initialize` and traps when one of its exports runs before initialization, so the worker initializes the module first and checks the version afterwards. The module has no preopens and no environment, and a mismatched version still marks the plugin failed; the difference from a command module is that the reactor's runtime setup ran before the rejection.
 - **The worker handshake is `ready` or `init-error`.** The host resolves startup only on `ready`, so a module that fails to compile or instantiate becomes a failed plugin rather than a hung startup.
 - **The worker has a memory limit.** `resourceLimits.maxOldGenerationSizeMb` is set to 256 MB.
 - **The worker cannot call back into the host synchronously**, because a host import cannot return across threads. The v1 protocol is declaration based, so this costs no capability.
@@ -504,7 +506,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **Standard streams are not plugin output channels.** The runtime detaches them before plugin code runs, so `print`, `stderr` and the logging module are discarded. Use `ctx.logger`. A write that still reaches `stdout` is a protocol violation, not log output.
 - **Tool results must be JSON serializable.** A raised exception becomes a tool error and leaves the process alive. A result the projection cannot represent is rejected at the call, again without killing the child.
 - **A Python plugin shares the profile environment.** Declare PyPI dependencies in `pyproject.toml` under `[project].dependencies`; `requirements.txt` is the older form and uses pip. A plugin cannot request a Python version or an isolated environment.
-- **A WebAssembly plugin exports the five core symbols** and must not depend on host imports beyond what `docs/wasm/WasmABI.md` section 1 declares. The WebAssembly backend stays off unless `wasm.enabled` is turned on.
+- **A WebAssembly plugin exports the six core exports** (`memory` plus the five functions) and must not depend on host imports beyond what `docs/wasm/WasmABI.md` section 1 declares. A WASI reactor additionally exports `_initialize`. The WebAssembly backend stays off unless `wasm.enabled` is turned on.
 - **Operator surfaces are not plugin capabilities.** The Plugins-page controls, the HTTP routes and the `/mloader` command belong to dsh-mloader; an external plugin cannot call or rely on them. They may also change without notice, because they are not part of the ABI.
 - **Plugins are independent works.** The loader license does not apply to them, and the loader places no requirement on how a plugin is licensed.
 

@@ -22,7 +22,7 @@ const WASM_BIN = fileURLToPath(new URL('./fixtures/wasm-loop/loop.wasm', import.
 if (!existsSync(WASM_BIN)) {
   console.log('skip: wasm-safety needs a compiled wasm binary, which is not committed')
   console.log(`   expected at: ${WASM_BIN}`)
-  console.log('   compile test/fixtures/wasm-loop with GOOS=wasip1 GOARCH=wasm to run it.')
+  console.log('   compile test/fixtures/wasm-loop with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared to run it.')
   process.exit(0)
 }
 

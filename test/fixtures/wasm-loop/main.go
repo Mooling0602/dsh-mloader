@@ -1,5 +1,9 @@
 // Command wasmloop is a fault injection plugin. One tool enters an infinite loop
 // through the ABI, which proves the host can terminate the worker thread.
+//
+// The plugin is a WASI reactor. Build it with:
+//
+//	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o loop.wasm .
 package main
 
 import (
@@ -11,10 +15,13 @@ import (
 // writes and the host reads.
 var reqBuf, resBuf []byte
 
-// dshAlloc allocates the request buffer and returns its pointer.
+//go:wasmexport mloader_abi_version
+func mloaderABIVersion() uint32 { return 1 }
+
+// mloaderAlloc allocates the request buffer and returns its pointer.
 //
-//go:wasmexport dsh_alloc
-func dshAlloc(size uint32) uint32 {
+//go:wasmexport mloader_alloc
+func mloaderAlloc(size uint32) uint32 {
 	reqBuf = make([]byte, size)
 	if size == 0 {
 		return 0
@@ -22,15 +29,15 @@ func dshAlloc(size uint32) uint32 {
 	return uint32(uintptr(unsafe.Pointer(&reqBuf[0])))
 }
 
-// dshFree releases the request buffer.
+// mloaderFree releases the request buffer.
 //
-//go:wasmexport dsh_free
-func dshFree(ptr, size uint32) { reqBuf = nil }
+//go:wasmexport mloader_free
+func mloaderFree(ptr, size uint32) { reqBuf = nil }
 
-// dshResultPtr returns the pointer of the result buffer, or zero when empty.
+// mloaderResultPtr returns the pointer of the result buffer, or zero when empty.
 //
-//go:wasmexport dsh_result_ptr
-func dshResultPtr() uint32 {
+//go:wasmexport mloader_result_ptr
+func mloaderResultPtr() uint32 {
 	if len(resBuf) == 0 {
 		return 0
 	}
@@ -44,10 +51,10 @@ func writeJSON(v interface{}) uint32 {
 	return uint32(len(resBuf))
 }
 
-// dshCall handles one protocol request and returns the result length.
+// mloaderCall handles one protocol request and returns the result length.
 //
-//go:wasmexport dsh_call
-func dshCall(ptr, length uint32) uint32 {
+//go:wasmexport mloader_call
+func mloaderCall(ptr, length uint32) uint32 {
 	raw := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
 	var req struct {
 		Op      string          `json:"op"`

@@ -30,6 +30,8 @@ The core ABI depends on the WebAssembly core specification only. It does not req
 
 The module must report `1`, the core ABI version this host implements. A module missing any of these exports, reporting a non-integer version or reporting any other value fails to initialize, and the plugin is marked `failed`. The manifest has no ABI version field; the export is the authoritative value.
 
+A WASI reactor module also exports `_initialize`, which the worker calls before the version check. Section 4 specifies when it runs. It is not one of the six core exports.
+
 A source-only Rust example that implements these exports lives in `seeds/wasm-mloader/` of the dsh-mloader repository. It is not installed by the loader; build it before use.
 
 The manifest `entry` field names the `.wasm` file, resolved against the manifest directory. Selection through `targets` is a package format target contract and is not implemented; [Package](Package.md) section 1 specifies the field. The worker reads that file, compiles it and instantiates it.
@@ -70,16 +72,18 @@ The `apply` reply declares the plugin's capabilities in its `result` object:
 
 WASI is not part of the supported contract.
 
-- A module that imports `wasi_snapshot_preview1` is instantiated with a minimal preview1 provider: no preopened directories, no environment variables, no arguments, and exit handling that does not terminate the host. If the module exports `_start`, it is called once for initialization.
-- Go `wasip1` modules use a command model: `_start` may call `proc_exit`, so repeated calls after initialization are outside the supported behavior.
-- Reactor style modules are the supported shape, for example Rust, C or Zig built for `wasm32-unknown-unknown`.
+- A module that imports `wasi_snapshot_preview1` is instantiated with a minimal preview1 provider: no preopened directories, no environment variables, no arguments, and exit handling that does not terminate the host.
+- The worker supports the two WASI startup shapes. A command module exports `_start`, which runs once for initialization and may call `proc_exit`. A reactor module exports `_initialize`, which the host calls before the ABI version check and before any other exported function.
+- A reactor runtime may trap when one of its exports runs before `_initialize`. A Go `wasip1` module built with `-buildmode=c-shared` and `//go:wasmexport` is a reactor, and it needs the reactor path.
+- A Go `wasip1` command module uses the command model: `_start` may call `proc_exit`, so repeated calls after initialization are outside the supported behavior.
+- A module that imports no WASI function needs no startup shape. Rust, C or Zig built for `wasm32-unknown-unknown` export the core ABI directly.
 - No custom host imports are part of v1. A module that imports anything other than the WASI preview1 namespace fails to instantiate.
 
 ## 5. Worker isolation and deadlines
 
 - The module never runs on the host main thread. V8 has no fuel metering and no API to interrupt WebAssembly execution, so a synchronous call with an infinite loop would freeze the main thread permanently, including the timeout timer. Every instance runs in a `worker_threads` worker.
-- The host starts the worker, and the worker compiles and instantiates the module, checks the required exports, checks `mloader_abi_version` against the version the host implements, calls `_start` when WASI provides one, and then posts `ready`. A failure posts `init-error` and the plugin is marked `failed`. Startup succeeds only on `ready`.
-- Module initialization has no deadline of its own. A module whose `_start` never returns never posts `ready`, and the plugin stays `loaded` until it is unloaded or dsh restarts. The worker can still be terminated, so a looping initializer does not block the host thread.
+- The host starts the worker, and the worker compiles and instantiates the module, then checks the required exports. A WASI reactor is initialized through `_initialize` next, and the version check runs after initialization, because a reactor runtime traps when one of its exports runs first. A WASI command module has its version checked before `_start`, so a module written for another ABI shape never runs initialization code. A module that imports no WASI function has its version checked directly. The worker then posts `ready`. A failure posts `init-error` and the plugin is marked `failed`. Startup succeeds only on `ready`.
+- Module initialization has no deadline of its own. A module whose `_start` or `_initialize` never returns never posts `ready`, and the plugin stays `loaded` until it is unloaded or dsh restarts. The worker can still be terminated, so a looping initializer does not block the host thread.
 - The worker runs with `resourceLimits.maxOldGenerationSizeMb` set to 256 MB.
 - The apply handshake uses the manifest `timeouts.startupMs`, and each `tool.call` or `event` delivery uses `timeouts.callMs`. On expiry the host terminates the worker, because terminating it is the only mechanism that stops a looping instance. A timed out call therefore ends the plugin's instance, unlike the Python backend, where the process stays alive.
 - The host clears the worker handle before terminating it, so a late reply cannot settle a call that already failed.
