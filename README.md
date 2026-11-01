@@ -67,6 +67,10 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 
 The command derives the profile from the environment path. [Python package](docs/python-sdk/Package.md) section 6 is the full command reference.
 
+## WebAssembly example
+
+The repository ships two examples under `seeds/`. `hello-mloader` is the complete Python example that a profile receives automatically. `wasm-mloader` is a source-only Rust example; the loader never releases it, and no compiled `.wasm` file is committed. Build it with `./seeds/wasm-mloader/build.sh`, copy the generated `dist/wasm-mloader` directory into the profile plugin root, and enable `wasm.enabled`. The build requirements and the example contract are in [seeds/wasm-mloader](seeds/wasm-mloader/README.md).
+
 ## Inspect and switch plugins
 
 Two surfaces read the same snapshot:
@@ -105,7 +109,7 @@ Every key is optional. The default column is what dsh-mloader uses when you leav
 | `enablePyc` | `false` | Whether Python keeps the bytecode cache it writes beside a plugin. Off means a reload always runs the code on disk, so turning it on trades that for a faster start. |
 | `statusTool` | `true` | Whether the plugin status and management tools are registered for the model. |
 | `command` | `true` | The `/mloader` command: `true` for the default name, a string for a custom name, `false` to disable it. |
-| `seedExamples` | `true` | Whether the bundled example is released and refreshed in the profile on every start. |
+| `seedExamples` | `true` | Whether the bundled complete Python example is released and refreshed in the profile on every start. Source-only examples are never released. |
 | `console` | `true` | Terminal output: `true` for lifecycle lines, `'verbose'` for scan detail as well, `false` for silence. |
 | `watch` | `true` | Whether plugin directories added or removed while dsh runs are mounted or unmounted without a restart. |
 | `wasm.enabled` | `false` | Whether the WebAssembly backend is enabled. |
@@ -121,6 +125,7 @@ The shape of each value, the bytecode cache trade-off and the restart checklist 
 - [docs/python-sdk/Package](docs/python-sdk/Package.md): the Python package layout, dependencies, shared environment and command line.
 - [docs/wasm/Package](docs/wasm/Package.md): the WebAssembly package targets and directory layout, specified as a target contract.
 - [CONTEXT](CONTEXT.md): technical detail for maintainers, including the build and artifact policy, configuration defaults, test recipes and the restart checklist.
+- [seeds](seeds/README.md): the bundled example sources, including the released Python example and the source-only Rust WebAssembly example.
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk): the Python SDK package, a mirror of `src/runtime/python_sdk/` with the packaging metadata and tests.
 
 ## License

@@ -3,9 +3,10 @@
  * WebAssembly plugin in a worker thread, exercised through a real Cordis context
  * and the real tool runtime.
  *
- * A compiled `.wasm` binary is required. The binaries are not committed, so the
- * suite skips cleanly when the fixture is absent; a skip leaves the property
- * unverified rather than failing.
+ * The WebAssembly plugin is the source example under seeds/wasm-mloader. A
+ * compiled `.wasm` binary is required. The binaries are not committed, so the
+ * suite skips cleanly when the example has not been built; a skip leaves the
+ * property unverified rather than failing.
  */
 
 import { existsSync } from 'node:fs'
@@ -14,11 +15,12 @@ import { Context } from '@deepseek-ai/cordis'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { apply as loaderApply } from '../src/index.js'
 
-const WASM_BIN = fileURLToPath(new URL('./plugins/wasm-hello/hello.wasm', import.meta.url))
+const WASM_BIN = fileURLToPath(new URL('../seeds/wasm-mloader/dist/wasm-mloader/wasm_mloader.wasm', import.meta.url))
+const WASM_ROOT = fileURLToPath(new URL('../seeds/wasm-mloader/dist', import.meta.url))
 if (!existsSync(WASM_BIN)) {
-  console.log('skip: dual-backend needs a compiled wasm binary, which is not committed')
+  console.log('skip: dual-backend needs the compiled seeds/wasm-mloader example')
   console.log(`   expected at: ${WASM_BIN}`)
-  console.log('   compile test/plugins/wasm-hello with GOOS=wasip1 GOARCH=wasm to run it.')
+  console.log('   run ./seeds/wasm-mloader/build.sh to build it.')
   process.exit(0)
 }
 
@@ -79,7 +81,7 @@ async function main() {
   await sleep(200)
   const tools = root.get('tools')
 
-  const roots = [new URL('./plugins', import.meta.url).pathname]
+  const roots = [new URL('./plugins', import.meta.url).pathname, WASM_ROOT]
   const loaderFiber = root.plugin(
     { name: 'dsh-mloader', inject: ['tools'], apply: loaderApply },
     { roots, pythonBin: 'python3', wasm: { enabled: true }, profilePlugins: false, seedExamples: false, console: false },
@@ -96,10 +98,10 @@ async function main() {
   check('discovered 3 plugins', loader.list().length === 3, loader.list().map((entry) => `${entry.id}:${entry.state}`).join(','))
   check('py-hello applied', stateOf('py-hello')?.state === 'applied', JSON.stringify(stateOf('py-hello')))
   check('py-decl applied', stateOf('py-decl')?.state === 'applied', JSON.stringify(stateOf('py-decl')))
-  check('wasm-hello applied', stateOf('wasm-hello')?.state === 'applied', JSON.stringify(stateOf('wasm-hello')))
+  check('wasm-mloader applied', stateOf('wasm-mloader')?.state === 'applied', JSON.stringify(stateOf('wasm-mloader')))
 
   section('2. Each plugin reports the backend from its manifest')
-  check('wasm-hello backend=wasm', stateOf('wasm-hello')?.backend === 'wasm')
+  check('wasm-mloader backend=wasm', stateOf('wasm-mloader')?.backend === 'wasm')
   check('py-hello backend=python', stateOf('py-hello')?.backend === 'python')
 
   section('3. Python tools go through the real execute path')
@@ -120,7 +122,7 @@ async function main() {
   check('concurrent calls return correct results', mixed[0]?.sum === 3 && mixed[1]?.sum === 7 && mixed[2]?.mean === 9)
 
   section('6. Unloading the WebAssembly plugin does not affect Python')
-  await loader.unload('wasm-hello')
+  await loader.unload('wasm-mloader')
   const namesAfter = tools.schemas().map((schema) => schema.name)
   check('wasm_add revoked', !namesAfter.includes('wasm_add'), namesAfter.join(','))
   check('wasm_upper revoked', !namesAfter.includes('wasm_upper'))

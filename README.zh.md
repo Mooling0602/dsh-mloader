@@ -67,6 +67,10 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 
 命令会从环境路径推导 profile。完整命令参考见 [Python 包](docs/python-sdk/Package.zh.md) 第 6 节。
 
+## WebAssembly 示例
+
+仓库在 `seeds/` 下提供两个示例。`hello-mloader` 是完整的 Python 示例，profile 会自动收到它。`wasm-mloader` 是只含源码的 Rust 示例，加载器不会释放它，仓库也不提交编译后的 `.wasm`。用 `./seeds/wasm-mloader/build.sh` 构建，把生成的 `dist/wasm-mloader` 目录复制到 profile 插件根目录，并启用 `wasm.enabled`。构建要求和示例契约见 [seeds/wasm-mloader](seeds/wasm-mloader/README.md)。
+
 ## 查看与切换插件
 
 两个入口读取同一份快照：
@@ -105,7 +109,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | `enablePyc` | `false` | 是否保留 Python 写在插件旁边的字节码缓存。关闭时每次重新加载都执行磁盘上的代码，开启则是用这个保证换取更快的启动。 |
 | `statusTool` | `true` | 是否为模型注册插件状态和管理工具。 |
 | `command` | `true` | `/mloader` 命令：`true` 用默认名，字符串为自定义名，`false` 关闭。 |
-| `seedExamples` | `true` | 每次启动时是否把随包示例释放并刷新到 profile 里。 |
+| `seedExamples` | `true` | 每次启动时是否把随包的完整 Python 示例释放并刷新到 profile 里。只含源码的示例不会被释放。 |
 | `console` | `true` | 终端输出：`true` 只打印生命周期行，`'verbose'` 连扫描细节一起打印，`false` 静默。 |
 | `watch` | `true` | dsh 运行期间新增或删除的插件目录是否免重启自动挂载和卸载。 |
 | `wasm.enabled` | `false` | 是否启用 WebAssembly 后端。 |
@@ -121,6 +125,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 - [docs/python-sdk/Package](docs/python-sdk/Package.zh.md)：Python 插件包布局、依赖、共享环境和命令行。
 - [docs/wasm/Package](docs/wasm/Package.zh.md)：WebAssembly 插件包的目标元数据与目录布局，目标契约。
 - [CONTEXT](CONTEXT.md)：面向维护者的技术细节，包括构建与产物策略、配置默认值、测试方法和重启验收清单。
+- [seeds](seeds/README.md)：随包示例源码，包括自动释放的 Python 示例和只含源码的 Rust WebAssembly 示例。
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk)：Python SDK 包，是 `src/runtime/python_sdk/` 的镜像，带打包元数据和测试。
 
 ## 许可证

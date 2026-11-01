@@ -1,7 +1,8 @@
-"""Example plugin: Cordis aligned style (style A).
+"""Test fixture plugin: Cordis aligned style (style A).
 
 The plugin is written in Python but follows the shape of a Cordis plugin: it
-exports an ``apply(ctx)`` entry function.
+exports an ``apply(ctx)`` entry function. User-facing examples live under
+``seeds/``.
 """
 
 from dsh_mloader_sdk import plugin

@@ -1,18 +1,21 @@
 /**
- * Bundled example plugin (seed) test.
+ * Bundled example release test.
  *
- * Verifies that installing the loader into a profile releases the example plugin
- * for the operator to read and edit. Covered:
- *   1. First release: files land and content is complete.
- *   2. An existing copy is replaced on the next release.
- *   3. Idempotence: repeated runs leave the same file set.
- *   4. The reserved id is rejected without the built-in marker.
- *   5. `seedExamples: false` does not touch the disk.
- *   6. An unwritable target does not break the loader (warning only).
- *   7. End to end: release, discovery, apply and a callable tool.
- *   8. The released example is a valid plugin (manifest and tool schema).
+ * Verifies that installing the loader into a profile releases only the complete
+ * Python example and leaves the source-only WebAssembly example in the package.
+ * Covered:
+ *   1. The complete Python example and the source-only wasm example are present.
+ *   2. First release: only the Python example lands and its content is complete.
+ *   3. An existing copy is replaced on the next release.
+ *   4. Idempotence: repeated runs leave the same file set.
+ *   5. The reserved id is rejected without the built-in marker.
+ *   6. `seedExamples: false` does not touch the disk.
+ *   7. An unwritable target does not break the loader (warning only).
+ *   8. End to end: release, discovery, apply and a callable tool.
+ *   9. The released example is a valid plugin (manifest and tool schema).
  */
 
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -73,6 +76,7 @@ async function main() {
     const seedNames = seedEntries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
     check('seed directory holds at least one example', seedNames.length >= 1, JSON.stringify(seedNames))
     check('it contains hello-mloader', seedNames.includes('hello-mloader'), JSON.stringify(seedNames))
+    check('it contains the source-only wasm example', seedNames.includes('wasm-mloader'), JSON.stringify(seedNames))
 
     const helloDir = join(SEED_DIR, 'hello-mloader')
     const helloFiles = await readdir(helloDir)
@@ -80,10 +84,19 @@ async function main() {
     check('the example has plugin.py', helloFiles.includes('plugin.py'), JSON.stringify(helloFiles))
     check('the example has the built-in marker', helloFiles.includes('.mloader.builtin.json'), JSON.stringify(helloFiles))
 
-    // The example must pass discovery, otherwise releasing it would be pointless.
+    const wasmDir = join(SEED_DIR, 'wasm-mloader')
+    const wasmFiles = await readdir(wasmDir)
+    check('the wasm example ships as source', wasmFiles.includes('Cargo.toml') && wasmFiles.includes('build.sh'),
+      JSON.stringify(wasmFiles))
+    check('the wasm example has no release manifest', !wasmFiles.includes('mloader.plugin.json'),
+      JSON.stringify(wasmFiles))
+    check('the wasm example has a manifest template', wasmFiles.includes('mloader.plugin.json.in'),
+      JSON.stringify(wasmFiles))
+
+    // The complete example must pass discovery; the source-only one must not appear.
     const foundSeed = await discover([SEED_DIR], null)
     check('the example passes discovery validation', foundSeed.specs.length >= 1, JSON.stringify(foundSeed.errors))
-    check('the example id is hello-mloader', foundSeed.specs.some((spec) => spec.id === 'hello-mloader'),
+    check('only hello-mloader is discovered', foundSeed.specs.length === 1 && foundSeed.specs[0].id === 'hello-mloader',
       JSON.stringify(foundSeed.specs.map((spec) => spec.id)))
 
     section('1b. The reserved id needs the built-in marker')
@@ -114,8 +127,12 @@ async function main() {
     const first = await installSeedExamples(targetA, loggerA)
 
     check('hello-mloader was released', first.installed.includes('hello-mloader'), JSON.stringify(first))
+    check('only the complete Python example was released', first.installed.length === 1 && !first.installed.includes('wasm-mloader'),
+      JSON.stringify(first))
     check('nothing was replaced on the first run', first.replaced.length === 0, JSON.stringify(first.replaced))
 
+    check('the source-only wasm example was not copied', !existsSync(join(targetA, 'wasm-mloader')),
+      JSON.stringify(await readdir(targetA)))
     const installedDir = join(targetA, 'hello-mloader')
     const installedFiles = await readdir(installedDir)
     check('the target holds the manifest', installedFiles.includes('mloader.plugin.json'), JSON.stringify(installedFiles))

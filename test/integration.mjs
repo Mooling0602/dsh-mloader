@@ -83,7 +83,7 @@ async function main() {
   check('loader provides the management service', typeof loader?.list === 'function')
 
   const plugins = loader?.list?.() ?? []
-  // test/plugins holds both Python and WebAssembly plugins; only the Python ones matter here.
+  // test/plugins holds the Python test fixtures; the WebAssembly example is source-only under seeds/wasm-mloader.
   const pythonPlugins = plugins.filter((plugin) => plugin.backend === 'python')
   check('two Python plugins are discovered', pythonPlugins.length === 2, `actual ${pythonPlugins.map((p) => p.id).join(',')}`)
 

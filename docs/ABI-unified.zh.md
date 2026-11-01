@@ -427,7 +427,7 @@ profile 目录从 `ctx.baseUrl` 探测，dsh 把它设为包含活动 `cordis.ym
 
 ### 8.2 随包示例
 
-探测到 profile 且 `seedExamples` 为 `true` 时，加载器在启动时、发现之前，把随包示例 `seed/hello-mloader/` 复制到 `<profile>/mloader/plugins/`。每次启动都会用随包副本替换已安装副本，包括读者添加的文件；副本携带 `.mloader.builtin.json`，它正是保留 id 的准入标记。`seedExamples: false` 不执行任何文件系统操作。
+探测到 profile 且 `seedExamples` 为 `true` 时，加载器在启动时、发现之前，把完整的随包 Python 示例 `seeds/hello-mloader/` 复制到 `<profile>/mloader/plugins/`。每次启动都会用随包副本替换已安装副本，包括读者添加的文件；副本携带 `.mloader.builtin.json`，它正是保留 id 的准入标记。只有 `seeds/` 下带完整 Python 清单和入口文件的目录会被释放；`seeds/wasm-mloader/` 这类只含源码的示例永远不会被复制。`seedExamples: false` 不执行任何文件系统操作。
 
 不要对持有插件的 profile 运行 `dsh --from-default-profile`：该命令会删除整个 profile 目录，包括 `mloader/plugins`。
 
@@ -452,7 +452,7 @@ dsh-mloader 为运行 dsh 的人提供三个操作界面：
 5. 不支持插件 UI 或客户端半边。
 6. 不允许 WebAssembly 插件同步回调宿主。
 7. 不向外部插件暴露斜杠命令或第 3 节白名单之外的任何能力。
-8. 默认不启用 WebAssembly 后端，也不随包提供 WebAssembly 示例。
+8. 默认不启用 WebAssembly 后端。仓库在 `seeds/wasm-mloader/` 提供只含源码的 WebAssembly 示例，加载器永远不会安装它。
 9. 不自动重启崩溃的插件。
 10. 不监听已安装插件内部的文件。清单或入口文件变化只有在重新加载或重启后才生效。
 11. 不给 Python 插件单独的环境，也不选择 Python 版本。同一个 profile 的所有 Python 插件共用一个由配置解释器创建的环境。

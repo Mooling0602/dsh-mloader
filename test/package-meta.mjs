@@ -108,8 +108,10 @@ async function main() {
   check("exports maps './package.json'", manifest.exports?.['./package.json'] === './package.json',
     JSON.stringify(manifest.exports?.['./package.json']))
 
-  section('4. files ships the locale directory')
+  section('4. files ships the locale directory and the bundled examples')
   check("files includes 'locale/*.json'", Array.isArray(manifest.files) && manifest.files.includes('locale/*.json'),
+    JSON.stringify(manifest.files))
+  check("files includes 'seeds'", Array.isArray(manifest.files) && manifest.files.includes('seeds'),
     JSON.stringify(manifest.files))
 
   section('5. Every locale file resolves from inside the package')

@@ -5,5 +5,7 @@ __pycache__/
 .gocache/
 .gopath/
 *.wasm
+seeds/**/target/
+seeds/**/dist/
 dsh-*.log
 .venv/

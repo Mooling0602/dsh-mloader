@@ -1,4 +1,4 @@
-"""Example plugin: declarative style (style B).
+"""Test fixture plugin: declarative style (style B).
 
 The module has no ``apply`` function. It collects tools with ``@tool`` and the
 runtime registers them during the apply handshake. Both styles may be mixed

@@ -49,7 +49,7 @@ src/
   discovery.ts             scan plugin roots for mloader.plugin.json
   registrar.ts             per-plugin registration ledger and host tool factory
   serialize.ts             projection of live host objects into transportable data
-  seed.ts                  release and refresh of the bundled example in the profile
+  seed.ts                  release and refresh of complete Python examples in the profile
   watch.ts                 recursive watch on the plugin roots, debounced callback
   console.ts               terminal output channel, separate from ctx.logger
   http.ts                  optional operator HTTP routes behind the web server
@@ -72,7 +72,8 @@ client.js                  committed generated browser bundle
 locale/en.json             title and description the Plugins page renders
 locale/zh.json             Simplified Chinese copy of the same two fields
 tsconfig.client.json       compiler configuration for src/client
-seed/hello-mloader/        bundled example plugin: manifest, plugin.py and built-in marker
+seeds/hello-mloader/       released Python example: manifest, plugin.py and built-in marker
+seeds/wasm-mloader/        source-only Rust WebAssembly example and build script
 test/                      standalone suites and their fixtures
 docs/ABI-unified.md        shared plugin contract
 docs/Package.md             shared package format and install rules, implemented for Python
@@ -86,11 +87,11 @@ Each document under `docs/` has a Simplified Chinese counterpart at the same pat
 
 Top level files: `AGENTS.md` (rules), `CONTEXT.md` (this file), `README.md` and `README.zh.md` (users), `NOTICE` (copyright and license mapping), `LICENSE`, `COPYING` and `COPYING.LESSER` (license texts), `package.json` (package metadata and scripts), `pnpm-lock.yaml`, `tsconfig.json` (host compiler configuration), `tsconfig.client.json` (browser half compiler configuration), `client.js` (generated browser bundle), `locale/` (the title and description the Plugins page renders, per language), `cordis.patch.yml` (default loader configuration), `scripts/` (maintainer build scripts), `.markdownlint.json` (Markdown lint policy) and `.gitignore`. The `.build/` intermediate directory is ignored.
 
-The test tree holds the suites directly under `test/`, the Python and WebAssembly test plugins under `test/plugins/`, fault injection plugins under `test/fixtures/`, the reentrancy fixture under `test/deadlock/reentrant/` and the event projection fixture under `test/exec-payload/exec-observer/`.
+The test tree holds the suites directly under `test/`, the Python test plugins under `test/plugins/`, fault injection plugins under `test/fixtures/`, the reentrancy fixture under `test/deadlock/reentrant/` and the event projection fixture under `test/exec-payload/exec-observer/`. The source-only WebAssembly example lives under `seeds/wasm-mloader/`, not under the test tree.
 
 `.markdownlint.json` records the line wrapping policy that section 7 of `AGENTS.md` states as a rule. It disables `MD013`, which counts the characters in a line, because a paragraph is one complete line with no width limit. It sets `siblings_only` on `MD024`, which permits two headings with the same text when they have different parents while a duplicate among siblings is still an error. Both repositories carry the same file, so a checkout lints to the same expectations as the published copy.
 
-The Python SDK is a flat package. Its content is the directory `src/runtime/python_sdk/`: `__init__.py`, `launch.py`, `channel.py`, `context.py`, `errors.py`, `runtime.py`, `version.py`, `dependencies.py`, `environment.py`, `packaging.py`, `trash.py`, `cli.py`, `__main__.py`, `run_cli.py`, `py.typed` and `LICENSE`. There is no nested package directory inside it.
+The Python SDK is a flat package. Its content is the directory `src/runtime/python_sdk/`: `__init__.py`, `launch.py`, `channel.py`, `context.py`, `stdio.py`, `errors.py`, `runtime.py`, `version.py`, `dependencies.py`, `environment.py`, `packaging.py`, `trash.py`, `cli.py`, `__main__.py`, `run_cli.py`, `py.typed` and `LICENSE`. There is no nested package directory inside it.
 
 ### Build and artifact policy
 
@@ -233,14 +234,14 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | --- | --- | --- |
 | `integration.mjs` | Python end to end on a real Cordis context and a real tool runtime | no |
 | `edge-cases.mjs` | schema pre-validation, event whitelist, crash isolation, unload cleanup | no |
-| `dual-backend.mjs` | Python and WebAssembly plugins in one loader | yes, otherwise skips |
+| `dual-backend.mjs` | Python and WebAssembly plugins in one loader, using the built `seeds/wasm-mloader` example | yes, otherwise skips |
 | `wasm-safety.mjs` | a looping WebAssembly plugin does not block the host thread | yes, otherwise skips |
 | `waterfall.mjs` | tool execution chain is not blocked by event listeners | no |
 | `reentrancy.mjs` | a real Python subprocess survives reentrant event delivery | no |
 | `exec-payload.mjs` | host exec objects cross the process boundary safely; tools stay usable after a dirty payload | no |
 | `command.mjs` | the `/mloader` command group on a real command runtime: list, detail, load, unload, reload, usage and reserved words | no |
 | `profile-install.mjs` | profile path resolution and plugin loading, including `ctx.baseUrl` | no |
-| `seed.mjs` | bundled example release and refresh, reserved id enforcement and the built-in marker | no |
+| `seed.mjs` | bundled Python example release and refresh, source-only wasm exclusion, reserved id enforcement and the built-in marker | no |
 | `crash-safety.mjs` | EPIPE, orphan process and unload hang resistance | no |
 | `console.mjs` | terminal output levels and write failure tolerance | no |
 | `plugin-toggle.mjs` | runtime switches through the operator routes: real load and unload, manual enable of a manifest-disabled plugin, crash recovery, route removal and the non-web compatibility case | no |
@@ -266,11 +267,11 @@ The suites use different assertion and test runners, so their counts are not agg
 `.wasm` files are not committed (see `.gitignore`). Compile the two fixtures before running the WebAssembly suites:
 
 ```bash
-cd test/plugins/wasm-hello && GOOS=wasip1 GOARCH=wasm go build -o hello.wasm .
+./seeds/wasm-mloader/build.sh
 cd test/fixtures/wasm-loop && GOOS=wasip1 GOARCH=wasm go build -o loop.wasm .
 ```
 
-`dual-backend.mjs` and `wasm-safety.mjs` skip cleanly when the binaries are missing. A skipped suite means the property it asserts is unverified in that environment, not that it passed.
+The WebAssembly example in `dual-backend.mjs` is the compiled `seeds/wasm-mloader` example; build it with `./seeds/wasm-mloader/build.sh` (Rust `wasm32-unknown-unknown` target and a working wasm linker required). The loop fixture still uses Go. `dual-backend.mjs` and `wasm-safety.mjs` skip cleanly when the binaries are missing. A skipped suite means the property it asserts is unverified in that environment, not that it passed.
 
 ### Prepare the Python SDK copy for a release
 
@@ -301,7 +302,7 @@ The defaults are defined in `src/index.ts` and repeated in `cordis.patch.yml`. A
 | `enablePyc` | `false` | Keep the `__pycache__` directory a Python plugin writes when the interpreter loads its entry file. It is off by default, so a reload always runs the code currently on disk. Enabling it trades that guarantee for a faster start. |
 | `statusTool` | `true` | Register the status and management tools for the model. |
 | `command` | `true` | Register the `/mloader` command group. `false` disables it; a string sets a custom command name matching `^[a-z][a-z0-9_-]*$`. |
-| `seedExamples` | `true` | Release and refresh the bundled example in the profile plugin directory on every start. |
+| `seedExamples` | `true` | Release and refresh the bundled complete Python example in the profile plugin directory on every start. Source-only examples are not released. |
 | `console` | `true` | Terminal output: `true` for lifecycle events, `'verbose'` for scan detail, `false` for silence. |
 | `watch` | `true` | Mount a plugin directory installed while the loader runs and unmount one that is deleted. `false` installs no watcher, so a new plugin needs a restart. |
 | `wasm.enabled` | `false` | Enable the WebAssembly backend. It is off by default. |
@@ -447,11 +448,12 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **A manifest with `enabled: false` is discovered and skipped.** The record is created in state `disabled` so the operator surfaces can report it.
 - **`autoEnable: false` leaves plugins in `discovered`** without starting them.
 - **Reload stops the old backend before it starts a new one.** Two backend instances never run for the same plugin id. The new Python process imports the plugin module again, so module level state does not survive a reload.
-- **The bundled example is refreshed on every start.** The target directory is removed and the packaged copy is written in its place, including files the user added. The example is maintained by the loader, so local edits do not survive a restart; this is what keeps the reference code current.
+- **Only complete Python examples are released.** The installer copies a directory under `seeds/` only when it carries a `mloader.plugin.json` whose backend is Python and whose entry file exists. A source-only example such as `seeds/wasm-mloader` stays in the package and is never written to the profile.
 - **The bundled id is reserved.** `hello-mloader` is accepted only when the directory carries `.mloader.builtin.json` with a matching id and `source` set to `dsh-mloader`. A manifest with that id and no valid marker is rejected during discovery.
 - **The seed runs before plugin discovery.** The released example is loaded in the same startup, so a fresh install has a working tool without a second restart.
-- **Seed and plugin failures are warnings, not fatal.** A read-only profile, a full disk or an unreadable bundled seed directory must not stop the loader from hosting the plugins that are already there. The bundled seed directory is `<repo>/seed`.
+- **The released example is refreshed on every start.** The target directory is removed and the packaged copy is written in its place, including files the user added. The example is maintained by the loader, so local edits do not survive a restart; this is what keeps the reference code current.
 - **A released example must pass discovery like any other plugin.** Release is not a privilege: if the example's manifest is invalid, or its built-in marker is missing, discovery reports it and the loader continues.
+- **Seed and plugin failures are warnings, not fatal.** A read-only profile, a full disk or an unreadable bundled seed directory must not stop the loader from hosting the plugins that are already there. The bundled seed directory is `<repo>/seeds`.
 - **The seed is skipped when no profile directory is known.** The loader does not write into a directory it cannot identify as the active profile.
 - **`mloader_status` and the `/mloader` list share one formatter.** Both call `buildStatus` and `format` from `tools/status.ts`; a change to one surface updates the other by construction. A list query returns `{ count, plugins, byBackend, byState }`; the model's tool also accepts an id and then returns `{ plugin }` rather than `{ plugins }`, and the formatter must accept both shapes. A snapshot carries `id`, `name`, `version`, `backend`, `state`, `tools`, `events` and `registrations`, plus `error` only when the plugin has failed.
 - **The management tools share the command operations.** `mloader_info`, `mloader_load`, `mloader_unload` and `mloader_reload` each require an exact plugin `id` and return the same text as the corresponding command form. Failed operations raise tool errors. The tools register when `statusTool` is enabled, independently of the optional command service and the `command` setting, and are disposed with the loader. Load, unload and reload affect runtime state only; they do not install plugins or change manifests.

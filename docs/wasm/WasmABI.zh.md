@@ -29,6 +29,8 @@
 
 缺少任何一个导出的模块都无法初始化，插件会被标记为 `failed`。
 
+实现这些导出的只含源码的 Rust 示例位于 dsh-mloader 仓库的 `seeds/wasm-mloader/`。加载器不会安装它，使用前需要自行构建。
+
 清单的 `entry` 字段指定 `.wasm` 文件，按清单目录解析。通过 `targets` 选择产物是尚未实现的包格式目标契约；[Package](Package.zh.md) 第 1 节规定了该字段。worker 读取这个文件、编译并实例化它。
 
 ## 2. 请求与结果约定

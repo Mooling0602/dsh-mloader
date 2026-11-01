@@ -34,7 +34,7 @@
     "src",
     "!src/**/__pycache__",
     "!src/**/*.pyc",
-    "seed",
+    "seeds",
     "cordis.patch.yml",
     "COPYING",
     "COPYING.LESSER",

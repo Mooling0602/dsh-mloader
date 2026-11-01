@@ -1,0 +1,13 @@
+{
+  "id": "wasm-mloader",
+  "name": "WASM Mloader example",
+  "version": "0.1.0",
+  "description": "Source-built WebAssembly example for dsh-mloader. It registers two tools and has no logging channel.",
+  "backend": "wasm",
+  "entry": "@ENTRY@",
+  "enabled": true,
+  "timeouts": {
+    "startupMs": 10000,
+    "callMs": 15000
+  }
+}

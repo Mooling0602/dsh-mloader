@@ -1,19 +1,25 @@
 /**
  * Release of the bundled example plugins into the profile.
  *
- * The package ships one reference plugin under seed/. Every start replaces each
- * example in <profile>/mloader/plugins with the packaged copy, so the released
- * code always matches the installed loader. A release failure is a warning,
- * never a startup failure. The id hello-mloader is reserved for the bundled
- * example; discovery accepts it only with the bundled marker.
+ * The package ships examples under seeds/. Only a complete Python plugin is
+ * released: a source-only example such as the WebAssembly module is left in
+ * the package and never copied into a profile. Every start replaces each
+ * released example in <profile>/mloader/plugins with the packaged copy, so the
+ * released code always matches the installed loader. A release failure is a
+ * warning, never a startup failure. The id hello-mloader is reserved for the
+ * bundled example; discovery accepts it only with the bundled marker.
  *
  * @module seed
  */
-import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-/** Absolute directory that holds the bundled example plugins. */
-export const SEED_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'seed');
+/** Manifest name that marks one release-ready example plugin. */
+const MANIFEST_NAME = 'mloader.plugin.json';
+/** Only Python example plugins are released into a profile. */
+const RELEASED_BACKEND = 'python';
+/** Absolute directory that holds the bundled example sources. */
+export const SEED_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'seeds');
 /** Return true when a path exists. */
 async function exists(path) {
     try {
@@ -24,15 +30,20 @@ async function exists(path) {
         return false;
     }
 }
+/** Return true when a parsed manifest is a JSON object. */
+function isRecord(value) {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 /**
  * Replace the bundled examples in a plugin directory.
  *
  * A target directory is removed and the packaged copy is written in its place
  * on every start. This keeps the reference implementation current and removes
  * edits to it, because the bundled example is maintained by the loader rather
- * than by the operator. A failure on one example is logged as a warning and
- * does not stop the remaining examples, because the seed must never block
- * startup.
+ * than by the operator. A directory without a complete Python manifest and
+ * entry file is skipped, so source-only examples stay in the package. A
+ * failure on one example is logged as a warning and does not stop the
+ * remaining examples, because the seed must never block startup.
  *
  * @param targetDir - Plugin directory to populate, normally
  *   <profile>/mloader/plugins. An empty value releases nothing.
@@ -57,6 +68,25 @@ export async function installSeedExamples(targetDir, logger) {
         if (!entry.isDirectory())
             continue;
         const source = join(SEED_DIR, entry.name);
+        const manifestPath = join(source, MANIFEST_NAME);
+        if (!(await exists(manifestPath)))
+            continue;
+        let manifest;
+        try {
+            manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+        }
+        catch (error) {
+            logger?.warn?.('bundled example ' + entry.name + ' has an unreadable manifest: ' + messageOf(error));
+            continue;
+        }
+        if (!isRecord(manifest) || manifest.backend !== RELEASED_BACKEND || typeof manifest.entry !== 'string') {
+            logger?.warn?.('bundled example ' + entry.name + ' is not a complete Python plugin');
+            continue;
+        }
+        if (!(await exists(join(source, manifest.entry)))) {
+            logger?.warn?.('bundled example ' + entry.name + ' has no entry file at ' + manifest.entry);
+            continue;
+        }
         const target = join(targetDir, entry.name);
         const hadTarget = await exists(target);
         try {
