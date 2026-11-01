@@ -127,6 +127,7 @@ The shape of each value, the bytecode cache trade-off and the restart checklist 
 - [CONTEXT](CONTEXT.md): technical detail for maintainers, including the build and artifact policy, configuration defaults, test recipes and the restart checklist.
 - [seeds](seeds/README.md): the bundled example sources, including the released Python example and the source-only Rust WebAssembly example.
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk): the Python SDK package, a mirror of `src/runtime/python_sdk/` with the packaging metadata and tests.
+- [dsh-mloader-wasm-sdk](https://github.com/Mooling0602/dsh-mloader-wasm-sdk): the multi-language WebAssembly plugin SDK for Rust, Zig, Go and C, with a shared ABI conformance suite.
 
 ## License
 

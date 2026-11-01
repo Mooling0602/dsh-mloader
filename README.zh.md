@@ -127,6 +127,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 - [CONTEXT](CONTEXT.md)：面向维护者的技术细节，包括构建与产物策略、配置默认值、测试方法和重启验收清单。
 - [seeds](seeds/README.md)：随包示例源码，包括自动释放的 Python 示例和只含源码的 Rust WebAssembly 示例。
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk)：Python SDK 包，是 `src/runtime/python_sdk/` 的镜像，带打包元数据和测试。
+- [dsh-mloader-wasm-sdk](https://github.com/Mooling0602/dsh-mloader-wasm-sdk)：多语言 WebAssembly 插件 SDK，包含 Rust、Zig、Go 与 C 实现以及共享的 ABI 一致性套件。
 
 ## 许可证
 
