@@ -129,7 +129,8 @@ export class WasmBackendInstance implements BackendInstance {
   #spawnWorker(): Promise<Worker> {
     const worker = new Worker(new URL('./wasm-worker.js', import.meta.url), {
       workerData: { entry: this.spec.entry },
-      // Best effort memory limit, so a plugin cannot exhaust the host heap.
+      // Caps the worker's JavaScript heap only. WebAssembly linear memory is
+      // external memory and is not covered by this limit.
       resourceLimits: { maxOldGenerationSizeMb: 256 },
     })
 

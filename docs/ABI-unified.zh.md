@@ -376,7 +376,7 @@ interface RegistrarHandle {
 | 网络 | 默认允许 | 无访问 |
 | 崩溃隔离 | 进程级；宿主不受影响 | 线程级；宿主不受影响 |
 | 无限循环 | 启动期间的循环会在启动超时被杀；调用期间的循环会让该调用失败，进程继续存活 | 调用截止时间会终止 worker；初始化循环没有截止时间（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)） |
-| 内存限制 | 加载器不施加 | `maxOldGenerationSizeMb` 为 256 |
+| 内存限制 | 加载器不施加 | worker 的 JavaScript 堆由 `maxOldGenerationSizeMb` 限制为 256 MB；WebAssembly 线性内存不受限制 |
 | 环境 | 已清理；清单 `env` 随后应用 | 不适用 |
 
 Python 沙箱是进程隔离，不是权限隔离。Python 插件可以读写文件、打开网络连接，所以只应运行可信插件。WebAssembly 隔离阻止挂起阻塞宿主，也阻止主动 IO，但它不是防止模块内存破坏的安全边界。只应运行可信插件。

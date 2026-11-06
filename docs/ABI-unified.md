@@ -376,7 +376,7 @@ A backend must never let plugin code occupy the host main thread, must reap the 
 | Network | Allowed by default | No access |
 | Crash isolation | Process level; the host is unaffected | Thread level; the host is unaffected |
 | Infinite loop | A loop during startup is killed at the startup timeout; a loop during a call fails that call and the process stays alive | The call deadline terminates the worker; an initialization loop has no deadline ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)) |
-| Memory limit | None imposed by the loader | `maxOldGenerationSizeMb` is 256 |
+| Memory limit | None imposed by the loader | The worker's JavaScript heap is capped at 256 MB by `maxOldGenerationSizeMb`; WebAssembly linear memory is not capped |
 | Environment | Sanitized; manifest `env` is applied afterwards | Not applicable |
 
 The Python sandbox is process isolation, not permission isolation. A Python plugin can read and write files and open network connections, so only trusted plugins should run. The WebAssembly isolation prevents a hang from blocking the host and prevents active IO, but it is not a security boundary against memory corruption in the module. Only trusted plugins should run.
