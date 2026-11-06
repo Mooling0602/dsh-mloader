@@ -235,7 +235,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `integration.mjs` | Python end to end on a real Cordis context and a real tool runtime | no |
 | `edge-cases.mjs` | schema pre-validation, event whitelist, crash isolation, unload cleanup | no |
 | `dual-backend.mjs` | Python and WebAssembly plugins in one loader, using the built `seeds/wasm-mloader` example | yes, otherwise skips |
-| `wasm-safety.mjs` | a looping WebAssembly plugin does not block the host thread | yes, otherwise skips |
+| `wasm-safety.mjs` | a looping WebAssembly plugin does not block the host thread and can be reloaded after the timeout | yes, otherwise skips |
 | `wasm-abi.mjs` | in-memory modules: ABI version 1 is accepted, a mismatched version and a missing version export are rejected | no |
 | `wasm-reactor.mjs` | in-memory WASI reactor: `_initialize` runs before the version check, and the version check still rejects a mismatched version after initialization | no |
 | `wasm-init-deadline.mjs` | in-memory module: initialization exceeding the startup timeout terminates the worker and marks the plugin failed | no |
@@ -272,10 +272,10 @@ The suites use different assertion and test runners, so their counts are not agg
 
 ```bash
 ./seeds/wasm-mloader/build.sh
-cd test/fixtures/wasm-loop && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o loop.wasm .
+./test/fixtures/wasm-loop/build.sh
 ```
 
-The WebAssembly example in `dual-backend.mjs` is the compiled `seeds/wasm-mloader` example; build it with `./seeds/wasm-mloader/build.sh` (Rust `wasm32-unknown-unknown` target and a working wasm linker required). The loop fixture is a Go `wasip1` reactor built with `-buildmode=c-shared`. `dual-backend.mjs` and `wasm-safety.mjs` skip cleanly when the binaries are missing. A skipped suite means the property it asserts is unverified in that environment, not that it passed.
+The WebAssembly example in `dual-backend.mjs` is the compiled `seeds/wasm-mloader` example; build it with `./seeds/wasm-mloader/build.sh` (Rust `wasm32-unknown-unknown` target and a working wasm linker required). The loop fixture is a Go `wasip1` reactor built with `./test/fixtures/wasm-loop/build.sh`, which passes `-buildmode=c-shared`. `dual-backend.mjs` and `wasm-safety.mjs` skip cleanly when the binaries are missing. A skipped suite means the property it asserts is unverified in that environment, not that it passed.
 
 ### Prepare the Python SDK copy for a release
 

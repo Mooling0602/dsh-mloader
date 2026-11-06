@@ -4,8 +4,9 @@
  *
  * The assertions are: WebAssembly is off by default, an explicit enable mounts
  * the plugin, a looping call times out and terminates the worker while a
- * heartbeat keeps ticking, the Python plugin in the same loader keeps working,
- * and unload leaves no registrations behind.
+ * heartbeat keeps ticking, the plugin can be reloaded after the timeout, the
+ * Python plugin in the same loader keeps working, and unload leaves no
+ * registrations behind.
  *
  * A compiled `.wasm` binary is required. The binaries are not committed, so the
  * suite skips cleanly when the fixture is absent; a skip leaves the property
@@ -22,7 +23,7 @@ const WASM_BIN = fileURLToPath(new URL('./fixtures/wasm-loop/loop.wasm', import.
 if (!existsSync(WASM_BIN)) {
   console.log('skip: wasm-safety needs a compiled wasm binary, which is not committed')
   console.log(`   expected at: ${WASM_BIN}`)
-  console.log('   compile test/fixtures/wasm-loop with GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared to run it.')
+  console.log('   run test/fixtures/wasm-loop/build.sh to build it.')
   process.exit(0)
 }
 
@@ -140,7 +141,12 @@ async function main() {
   check('the timeout uses callMs=1200 (<3s)', elapsed < 3000, `${elapsed}ms`)
   check('the main thread stayed responsive (heartbeat >= 10)', beats >= 10, `beats=${beats}, elapsed=${elapsed}ms`)
 
-  section('4. The host keeps working')
+  section('4. The plugin can be reloaded after the timeout')
+  const reloaded = await loader.reload('wasm-loop')
+  check('the reloaded plugin is applied', reloaded.state === 'applied', JSON.stringify(reloaded))
+  check('a normal tool works after the reload', (await tools.get('wasm_fine').execute({}))?.fine === true)
+
+  section('5. The host keeps working')
   // The fixtures root also holds a Python plugin; it proves the worker failure
   // does not touch the process backend.
   const pyTool = tools.get('legal_tool')
@@ -154,7 +160,7 @@ async function main() {
   })
   check('the main thread can still schedule a timer', stillAlive === 'alive')
 
-  section('5. Unload is clean')
+  section('6. Unload is clean')
   await loaderFiber.dispose()
   await sleep(800)
   const finalNames = tools.schemas().map((schema) => schema.name)
