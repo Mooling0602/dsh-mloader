@@ -71,7 +71,8 @@ export class WasmBackendInstance {
      * Create the worker and resolve when it reports ready.
      *
      * @returns The started worker.
-     * @throws {Error} When initialization fails or the worker exits early.
+     * @throws {Error} When initialization fails, exceeds the startup deadline,
+     *   or the worker exits early.
      */
     #spawnWorker() {
         const worker = new Worker(new URL('./wasm-worker.js', import.meta.url), {
@@ -80,12 +81,25 @@ export class WasmBackendInstance {
             // external memory and is not covered by this limit.
             resourceLimits: { maxOldGenerationSizeMb: 256 },
         });
+        const startupMs = this.spec.timeouts.startupMs;
         return new Promise((resolve, reject) => {
+            let timer;
             const cleanup = () => {
+                if (timer !== undefined)
+                    clearTimeout(timer);
                 worker.off('message', onMessage);
                 worker.off('error', onError);
                 worker.off('exit', onExit);
             };
+            // The host owns the startup deadline because the worker cannot interrupt
+            // its own looping initialization.
+            timer = setTimeout(() => {
+                cleanup();
+                void worker.terminate().catch(() => {
+                    // The worker may already be gone when termination races its exit.
+                });
+                reject(new Error(`[${this.spec.id}] wasm init exceeded ${startupMs}ms; worker terminated`));
+            }, startupMs);
             const onMessage = (message) => {
                 if (message.type === 'ready') {
                     cleanup();

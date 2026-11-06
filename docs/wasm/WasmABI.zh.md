@@ -84,7 +84,7 @@ WASI 不属于受支持的契约。
 
 - 模块永远不在宿主主线程上运行。V8 没有 fuel 计量，也没有中断 WebAssembly 执行的 API，所以带无限循环的同步调用会让主线程永久冻结，连超时计时器也一起冻结。每个实例都运行在 `worker_threads` worker 里。
 - 宿主启动 worker，worker 编译并实例化模块，然后检查必需导出。reactor 接着通过 `_initialize` 初始化，导入 WASI 时经由 WASI 提供者，没有导入时直接调用；版本检查在初始化之后运行，因为 reactor 运行时在其导出函数先于初始化运行时会陷入 trap。命令模块的版本检查在 `_start` 之前，这样针对其他 ABI 形态编写的模块永远不会执行初始化代码。之后 worker 发送 `ready`。失败时发送 `init-error`，插件被标记为 `failed`。只有 `ready` 代表启动成功。
-- 模块初始化没有自己的截止时间。`_start` 或 `_initialize` 永不返回的模块永远不会发送 `ready`，插件会一直停在 `loaded`，直到被卸载或 dsh 重启。worker 仍然可以被终止，所以死循环的初始化不会阻塞宿主线程。
+- 模块初始化受清单的 `timeouts.startupMs` 约束，时间从 worker 启动算起，直到 `ready` 握手完成；编译、实例化、reactor 初始化和版本检查共享这个预算。`_start` 或 `_initialize` 超过该时间时，worker 会被终止，插件会被标记为 `failed`，所以死循环的初始化不会让插件停在 `loaded`。
 - worker 以 `resourceLimits.maxOldGenerationSizeMb` 为 256 MB 运行。这个值只限制 worker 的 JavaScript 堆；WebAssembly 线性内存属于外部内存，不受加载器限制，所以只应运行可信模块。
 - apply 握手使用清单的 `timeouts.startupMs`，每次 `tool.call` 或 `event` 投递使用 `timeouts.callMs`。超时后宿主终止 worker，因为终止是停止死循环实例的唯一机制。因此超时的调用会结束插件实例，这一点与 Python 后端不同，后者进程会继续存活。
 - 宿主在终止 worker 前清掉 worker 句柄，所以迟到的回复不能完成已经失败的调用。

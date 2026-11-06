@@ -98,7 +98,7 @@ The manifest is the authoritative source of plugin identity and backend selectio
 | `enabled` | no | boolean | `true` | When `false`, the plugin is discovered and reported but not started. |
 | `inject` | no | string[] | `[]` | Metadata forwarded to the plugin in its startup payloads. It grants no capability and resolves no host service. |
 | `capabilities` | no | object | all `true` | Switches `tools`, `events`, `logger` and `effect`. They are declared metadata: v1 does not enforce them, so setting one to `false` states intent only. The enforced boundaries are the registration operation whitelist in §3 and the event whitelist in §3.3. |
-| `timeouts.startupMs` | no | number | `10000` | Deadline for the startup handshake, in milliseconds. |
+| `timeouts.startupMs` | no | number | `10000` | Deadline for the startup handshake and WebAssembly module initialization, in milliseconds. |
 | `timeouts.callMs` | no | number | `30000` | Deadline for one tool call or one event delivery, in milliseconds. |
 | `env` | no | object | `{}` | Extra environment variables for a Python child process. Values are converted to strings. Ignored by the WebAssembly backend. |
 
@@ -287,13 +287,13 @@ The WebAssembly backend has no inbound request channel, so it sends none of the 
 
 | Situation | Behavior |
 | --- | --- |
-| `boot` or `apply` exceeds `startupMs` (default 10000 ms) | The loader stops the backend, marks the plugin `failed`, and leaves the other plugins unaffected. |
+| WebAssembly module initialization, `boot`, or `apply` exceeds `startupMs` (default 10000 ms) | The loader stops the backend, marks the plugin `failed`, and leaves the other plugins unaffected. |
 | `tool.call` or event delivery exceeds `callMs` (default 30000 ms) | The call returns an error. What happens to the instance is backend-specific: the Python process stays alive ([PyABI §7](python-sdk/PyABI.md#7-deadlines-and-failures)), and the WebAssembly worker is terminated ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)). |
 | The backend crashes | The plugin's registrations are revoked and its state becomes `failed`. dsh and the other plugins continue. |
 | A plugin request is invalid | It is rejected with `ok:false`, and the plugin can observe the rejection. |
 | A request cannot be delivered | It fails immediately with a `transport` error instead of waiting for the deadline. |
 
-The two deadlines come from the manifest: `timeouts.startupMs` covers `boot` and `apply`, and `timeouts.callMs` covers `tool.call` and event delivery. A backend enforces a deadline with the mechanism its isolation boundary provides; the backend document specifies that mechanism.
+The two deadlines come from the manifest: `timeouts.startupMs` covers WebAssembly module initialization as well as `boot` and `apply`, and `timeouts.callMs` covers `tool.call` and event delivery. A backend enforces a deadline with the mechanism its isolation boundary provides; the backend document specifies that mechanism.
 
 ## 5. Lifecycle and ownership
 
@@ -375,7 +375,7 @@ A backend must never let plugin code occupy the host main thread, must reap the 
 | File system | Full access by default | No access (no WASI preopens) |
 | Network | Allowed by default | No access |
 | Crash isolation | Process level; the host is unaffected | Thread level; the host is unaffected |
-| Infinite loop | A loop during startup is killed at the startup timeout; a loop during a call fails that call and the process stays alive | The call deadline terminates the worker; an initialization loop has no deadline ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)) |
+| Infinite loop | A loop during startup is killed at the startup timeout; a loop during a call fails that call and the process stays alive | An initialization loop is terminated at the startup timeout; a loop during a call terminates the worker ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)) |
 | Memory limit | None imposed by the loader | The worker's JavaScript heap is capped at 256 MB by `maxOldGenerationSizeMb`; WebAssembly linear memory is not capped |
 | Environment | Sanitized; manifest `env` is applied afterwards | Not applicable |
 

@@ -238,6 +238,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `wasm-safety.mjs` | a looping WebAssembly plugin does not block the host thread | yes, otherwise skips |
 | `wasm-abi.mjs` | in-memory modules: ABI version 1 is accepted, a mismatched version and a missing version export are rejected | no |
 | `wasm-reactor.mjs` | in-memory WASI reactor: `_initialize` runs before the version check, and the version check still rejects a mismatched version after initialization | no |
+| `wasm-init-deadline.mjs` | in-memory module: initialization exceeding the startup timeout terminates the worker and marks the plugin failed | no |
 | `waterfall.mjs` | tool execution chain is not blocked by event listeners | no |
 | `reentrancy.mjs` | a real Python subprocess survives reentrant event delivery | no |
 | `exec-payload.mjs` | host exec objects cross the process boundary safely; tools stay usable after a dirty payload | no |
@@ -263,11 +264,11 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `python-logging.mjs` | standard stream isolation: every direct output route is discarded, stdin is detached, and only `ctx.logger` reaches the loader logger, including from a cleanup | no |
 | `python-sdk-scripts.mjs` | Python SDK maintenance scripts and virtual environment exclusion | no |
 
-The suites use different assertion and test runners, so their counts are not aggregated. The WebAssembly suites skip when their compiled fixtures are absent, except `wasm-abi.mjs` and `wasm-reactor.mjs`, which build their modules in memory and always run. A skip is an environment gap, not a pass.
+The suites use different assertion and test runners, so their counts are not aggregated. The WebAssembly suites skip when their compiled fixtures are absent, except `wasm-abi.mjs`, `wasm-reactor.mjs` and `wasm-init-deadline.mjs`, which build their modules in memory and always run. A skip is an environment gap, not a pass.
 
 ### WebAssembly fixtures
 
-`.wasm` files are not committed (see `.gitignore`). Compile the two fixtures before running the suites that need them; `wasm-abi.mjs` and `wasm-reactor.mjs` build their modules in memory and need no fixture:
+`.wasm` files are not committed (see `.gitignore`). Compile the two fixtures before running the suites that need them; `wasm-abi.mjs`, `wasm-reactor.mjs` and `wasm-init-deadline.mjs` build their modules in memory and need no fixture:
 
 ```bash
 ./seeds/wasm-mloader/build.sh
@@ -427,7 +428,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **Worker failure fails the calls that are pending.** A missing required export fails initialization through the `init-error` reply, and a worker exit rejects every pending call. `stop()` terminates the worker.
 - **The WebAssembly ABI version is self described.** The core exports are `memory`, `mloader_alloc`, `mloader_free`, `mloader_call`, `mloader_result_ptr` and `mloader_abi_version`. The version check runs after the required-export check. For a WASI command module it runs before `_start`, so a module built for another ABI shape never runs initialization code. The manifest carries no version field; the export is the authoritative value.
 - **A reactor is initialized before the version check.** A reactor exports `_initialize` and traps when one of its exports runs before initialization, so the worker initializes the module first and checks the version afterwards. The hook is not WASI specific: a module without WASI imports gets it called directly. The module has no preopens and no environment, and a mismatched version still marks the plugin failed; the difference from a command module is that the reactor's runtime setup ran before the rejection.
-- **The worker handshake is `ready` or `init-error`.** The host resolves startup only on `ready`, so a module that fails to compile or instantiate becomes a failed plugin rather than a hung startup.
+- **The worker handshake is `ready` or `init-error`, bounded by the startup timeout.** The host resolves startup only on `ready` and terminates the worker when initialization exceeds `timeouts.startupMs`, so a module that fails to compile, instantiate or initialize becomes a failed plugin rather than a hung startup.
 - **The worker has a JavaScript heap limit, not a WebAssembly memory limit.** `resourceLimits.maxOldGenerationSizeMb` caps the worker's V8 old generation at 256 MB. WebAssembly linear memory is external memory and is not capped by the loader, and the module runs in the same process as dsh, so only trusted plugins should run.
 - **The worker cannot call back into the host synchronously**, because a host import cannot return across threads. The v1 protocol is declaration based, so this costs no capability.
 - **Arguments to a worker are projected too.** `postMessage` uses structured clone, which throws on host objects such as `AbortSignal`; the same projection as the Python backend applies.

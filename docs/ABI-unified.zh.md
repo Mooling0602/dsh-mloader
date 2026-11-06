@@ -98,7 +98,7 @@ dsh main process (Node, Cordis)
 | `enabled` | 否 | 布尔 | `true` | 为 `false` 时插件会被发现并报告，但不启动。 |
 | `inject` | 否 | 字符串数组 | `[]` | 在启动载荷中转发给插件的元数据。不授予能力，也不解析宿主服务。 |
 | `capabilities` | 否 | 对象 | 全 `true` | 开关 `tools`、`events`、`logger` 和 `effect`。它们是声明性元数据：v1 不强制执行，所以设为 `false` 只表示意图。强制边界是第 3 节的注册操作白名单和第 3.3 节的事件白名单。 |
-| `timeouts.startupMs` | 否 | 数字 | `10000` | 启动握手的截止时间，单位毫秒。 |
+| `timeouts.startupMs` | 否 | 数字 | `10000` | 启动握手和 WebAssembly 模块初始化的截止时间，单位毫秒。 |
 | `timeouts.callMs` | 否 | 数字 | `30000` | 一次工具调用或一次事件投递的截止时间，单位毫秒。 |
 | `env` | 否 | 对象 | `{}` | Python 子进程的额外环境变量。值会转成字符串。WebAssembly 后端忽略。 |
 
@@ -287,13 +287,13 @@ WebAssembly 后端没有入站请求通道，所以不发送任何插件载荷�
 
 | 情况 | 行为 |
 | --- | --- |
-| `boot` 或 `apply` 超过 `startupMs`（默认 10000 ms） | 加载器停止后端，把插件标记为 `failed`，其他插件不受影响。 |
+| WebAssembly 模块初始化、`boot` 或 `apply` 超过 `startupMs`（默认 10000 ms） | 加载器停止后端，把插件标记为 `failed`，其他插件不受影响。 |
 | `tool.call` 或事件投递超过 `callMs`（默认 30000 ms） | 调用返回错误。实例随后怎样处理取决于后端：Python 进程继续存活（[`PyABI 第 7 节`](python-sdk/PyABI.zh.md#7-截止时间与失败)），WebAssembly worker 被终止（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)）。 |
 | 后端崩溃 | 插件的注册被撤销，状态变为 `failed`。dsh 和其他插件继续运行。 |
 | 插件请求非法 | 以 `ok:false` 拒绝，插件可以看到拒绝。 |
 | 请求无法送达 | 立即以 `transport` 错误失败，而不是等待截止时间。 |
 
-两个截止时间来自清单：`timeouts.startupMs` 覆盖 `boot` 和 `apply`，`timeouts.callMs` 覆盖 `tool.call` 和事件投递。后端用其隔离边界提供的机制执行截止时间；后端文档规定该机制。
+两个截止时间来自清单：`timeouts.startupMs` 覆盖 WebAssembly 模块初始化以及 `boot` 和 `apply`，`timeouts.callMs` 覆盖 `tool.call` 和事件投递。后端用其隔离边界提供的机制执行截止时间；后端文档规定该机制。
 
 ## 5. 生命周期与归属
 
@@ -375,7 +375,7 @@ interface RegistrarHandle {
 | 文件系统 | 默认完全访问 | 无访问（没有 WASI 预打开目录） |
 | 网络 | 默认允许 | 无访问 |
 | 崩溃隔离 | 进程级；宿主不受影响 | 线程级；宿主不受影响 |
-| 无限循环 | 启动期间的循环会在启动超时被杀；调用期间的循环会让该调用失败，进程继续存活 | 调用截止时间会终止 worker；初始化循环没有截止时间（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)） |
+| 无限循环 | 启动期间的循环会在启动超时被杀；调用期间的循环会让该调用失败，进程继续存活 | 初始化循环会在启动超时被终止；调用期间的循环会终止 worker（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)） |
 | 内存限制 | 加载器不施加 | worker 的 JavaScript 堆由 `maxOldGenerationSizeMb` 限制为 256 MB；WebAssembly 线性内存不受限制 |
 | 环境 | 已清理；清单 `env` 随后应用 | 不适用 |
 
