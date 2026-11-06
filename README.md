@@ -7,6 +7,8 @@ Multi-runtime plugin loader for [DeepSeek Harness](https://github.com/deepseek-a
 [![dsh-badge](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
 [![license-lgpl-3.0-badge](https://img.shields.io/github/license/Mooling0602/dsh-mloader?style=flat-square)](https://github.com/Mooling0602/dsh-mloader/blob/main/LICENSE)
 
+![dsh-mloader connects plugins written in multiple languages to DeepSeek Harness](dsh-mloader-promo.png)
+
 ## Install
 
 ```bash
