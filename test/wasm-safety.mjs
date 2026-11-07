@@ -141,12 +141,42 @@ async function main() {
   check('the timeout uses callMs=1200 (<3s)', elapsed < 3000, `${elapsed}ms`)
   check('the main thread stayed responsive (heartbeat >= 10)', beats >= 10, `beats=${beats}, elapsed=${elapsed}ms`)
 
-  section('4. The plugin can be reloaded after the timeout')
+  const failedRecord = loader.list().find((entry) => entry.id === 'wasm-loop')
+  check('the timed out plugin is marked failed', failedRecord?.state === 'failed', JSON.stringify(failedRecord))
+  check(
+    'the failed record names the timeout',
+    /timed out/i.test(failedRecord?.error ?? ''),
+    failedRecord?.error,
+  )
+  check(
+    'the timed out plugin tool is revoked',
+    !tools.schemas().some((schema) => schema.name === 'wasm_fine'),
+  )
+
+  section('4. The plugin can be recovered after the timeout')
+  const enabledAfterFailure = await loader.enable('wasm-loop')
+  check('the failed plugin can be enabled', enabledAfterFailure.state === 'applied', JSON.stringify(enabledAfterFailure))
+  check('a normal tool works after enable', (await tools.get('wasm_fine').execute({}))?.fine === true)
   const reloaded = await loader.reload('wasm-loop')
   check('the reloaded plugin is applied', reloaded.state === 'applied', JSON.stringify(reloaded))
+  check('the reloaded record carries no error', reloaded.error === undefined, JSON.stringify(reloaded))
   check('a normal tool works after the reload', (await tools.get('wasm_fine').execute({}))?.fine === true)
 
-  section('5. The host keeps working')
+  section('5. An intentional stop is not reported as a failure')
+  const beforeDisable = logger.lines.length
+  const disabled = await loader.disable('wasm-loop')
+  check('disable leaves the plugin disabled', disabled.state === 'disabled', JSON.stringify(disabled))
+  check('disable revokes the plugin tools', !tools.schemas().some((schema) => schema.name === 'wasm_fine'))
+  await sleep(300)
+  const stopReports = logger.lines
+    .slice(beforeDisable)
+    .filter((line) => /worker failed|process died|failed:/i.test(line))
+  check('an intentional stop is not reported as a failure', stopReports.length === 0, stopReports.join(' | '))
+  const reenabled = await loader.enable('wasm-loop')
+  check('the plugin can be enabled after a stop', reenabled.state === 'applied', JSON.stringify(reenabled))
+  check('a normal tool works after enable', (await tools.get('wasm_fine').execute({}))?.fine === true)
+
+  section('6. The host keeps working')
   // The fixtures root also holds a Python plugin; it proves the worker failure
   // does not touch the process backend.
   const pyTool = tools.get('legal_tool')
@@ -160,12 +190,17 @@ async function main() {
   })
   check('the main thread can still schedule a timer', stillAlive === 'alive')
 
-  section('6. Unload is clean')
+  section('7. Unload is clean')
+  const beforeUnload = logger.lines.length
   await loaderFiber.dispose()
   await sleep(800)
   const finalNames = tools.schemas().map((schema) => schema.name)
   check('no residual tools', finalNames.filter((name) => name.startsWith('py_') || name.startsWith('wasm_')).length === 0,
     finalNames.join(','))
+  const unloadReports = logger.lines
+    .slice(beforeUnload)
+    .filter((line) => /worker failed|process died/i.test(line))
+  check('unload does not report a crash', unloadReports.length === 0, unloadReports.join(' | '))
 
   if (failures.length === 0) {
     console.log(`\nAll passed: ${passed} assertions`)

@@ -288,7 +288,7 @@ The WebAssembly backend has no inbound request channel, so it sends none of the 
 | Situation | Behavior |
 | --- | --- |
 | WebAssembly module initialization, `boot`, or `apply` exceeds `startupMs` (default 10000 ms) | The loader stops the backend, marks the plugin `failed`, and leaves the other plugins unaffected. |
-| `tool.call` or event delivery exceeds `callMs` (default 30000 ms) | The call returns an error. What happens to the instance is backend-specific: the Python process stays alive ([PyABI §7](python-sdk/PyABI.md#7-deadlines-and-failures)), and the WebAssembly worker is terminated ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)). |
+| `tool.call` or event delivery exceeds `callMs` (default 30000 ms) | The call returns an error. What happens to the instance is backend-specific: the Python process stays alive ([PyABI §7](python-sdk/PyABI.md#7-deadlines-and-failures)), and the WebAssembly worker is terminated and the failure is reported, so the plugin becomes `failed` and its registrations are revoked ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)). |
 | The backend crashes | The plugin's registrations are revoked and its state becomes `failed`. dsh and the other plugins continue. |
 | A plugin request is invalid | It is rejected with `ok:false`, and the plugin can observe the rejection. |
 | A request cannot be delivered | It fails immediately with a `transport` error instead of waiting for the deadline. |
@@ -317,7 +317,7 @@ discovered -> loaded -> applied -> disposed
 - A registration attempted after the ledger is closed is disposed immediately rather than left dangling.
 - A tool call for a plugin that is not `applied` fails with an error that names the current state.
 - `reload` revokes the ledger, stops the backend instance and starts a fresh one. The new instance loads the plugin again, so module level state does not survive a reload.
-- A crashed plugin becomes `failed` and is not restarted automatically. An operator can reload it through the loader's optional `mloader` service or restart dsh.
+- A crashed plugin becomes `failed` and is not restarted automatically. For the WebAssembly backend a worker that exits, reports an error or exceeds a call deadline follows the same rule: the registrations are revoked, the instance is dropped and the record becomes `failed`. An operator can reload it through the loader's optional `mloader` service or restart dsh.
 - A plugin whose directory is deleted while the loader runs moves to `disposed` and is no longer listed. A plugin whose directory is created while the loader runs goes through the same startup path as a plugin present at startup, including the `enabled: false` and `autoEnable: false` rules.
 
 ## 6. Backend interface
@@ -365,7 +365,7 @@ Both backends satisfy the same contract. Their physical differences are:
 | Timeout enforcement | Request deadline; kill the process on a boot timeout | Terminate the worker |
 | Synchronous host callback | Possible in principle, not used by the SDK | Not possible; the worker cannot call back across threads |
 
-A backend must never let plugin code occupy the host main thread, must reap the process or worker it created when startup fails, and must surface a crash by failing pending calls so the loader can revoke the plugin's registrations.
+A backend must never let plugin code occupy the host main thread, must reap the process or worker it created when startup fails, and must surface an unexpected failure after apply by failing every pending call and reporting it once to the loader. The loader then revokes the plugin's registrations, marks it `failed` and drops the instance handle. A stop that the loader requested is not a failure.
 
 ## 7. Security model
 
@@ -375,7 +375,7 @@ A backend must never let plugin code occupy the host main thread, must reap the 
 | File system | Full access by default | No access (no WASI preopens) |
 | Network | Allowed by default | No access |
 | Crash isolation | Process level; the host is unaffected | Thread level; the host is unaffected |
-| Infinite loop | A loop during startup is killed at the startup timeout; a loop during a call fails that call and the process stays alive | An initialization loop is terminated at the startup timeout; a loop during a call terminates the worker ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)) |
+| Infinite loop | A loop during startup is killed at the startup timeout; a loop during a call fails that call and the process stays alive | An initialization loop is terminated at the startup timeout; a loop during a call terminates the worker and marks the plugin `failed` ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)) |
 | Memory limit | None imposed by the loader | The worker's JavaScript heap is capped at 256 MB by `maxOldGenerationSizeMb`; WebAssembly linear memory is not capped |
 | Environment | Sanitized; manifest `env` is applied afterwards | Not applicable |
 

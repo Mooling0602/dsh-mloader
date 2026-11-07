@@ -86,9 +86,10 @@ WASI 不属于受支持的契约。
 - 宿主启动 worker，worker 编译并实例化模块，然后检查必需导出。reactor 接着通过 `_initialize` 初始化，导入 WASI 时经由 WASI 提供者，没有导入时直接调用；版本检查在初始化之后运行，因为 reactor 运行时在其导出函数先于初始化运行时会陷入 trap。命令模块的版本检查在 `_start` 之前，这样针对其他 ABI 形态编写的模块永远不会执行初始化代码。之后 worker 发送 `ready`。失败时发送 `init-error`，插件被标记为 `failed`。只有 `ready` 代表启动成功。
 - 模块初始化受清单的 `timeouts.startupMs` 约束，时间从 worker 启动算起，直到 `ready` 握手完成；编译、实例化、reactor 初始化和版本检查共享这个预算。`_start` 或 `_initialize` 超过该时间时，worker 会被终止，插件会被标记为 `failed`，所以死循环的初始化不会让插件停在 `loaded`。
 - worker 以 `resourceLimits.maxOldGenerationSizeMb` 为 256 MB 运行。这个值只限制 worker 的 JavaScript 堆；WebAssembly 线性内存属于外部内存，不受加载器限制，所以只应运行可信模块。
-- apply 握手使用清单的 `timeouts.startupMs`，每次 `tool.call` 或 `event` 投递使用 `timeouts.callMs`。超时后宿主终止 worker，因为终止是停止死循环实例的唯一机制。因此超时的调用会结束插件实例，这一点与 Python 后端不同，后者进程会继续存活。
-- 宿主在终止 worker 前清掉 worker 句柄，所以迟到的回复不能完成已经失败的调用。
-- worker 退出或报错会让所有未决调用被拒绝。`stop()` 终止 worker。
+- apply 握手使用清单的 `timeouts.startupMs`，每次 `tool.call` 或 `event` 投递使用 `timeouts.callMs`。超时后宿主让所有未决调用失败、终止 worker，并上报一次原因为 `timeout` 的失败，因为终止 worker 是停止死循环实例的唯一机制。因此超时的调用会结束插件实例：它的注册被撤销，记录变为 `failed`；这一点与 Python 后端不同，后者进程会继续存活。
+- 宿主在终止 worker 前清掉 worker 句柄，所以迟到的回复或退出事件不能完成已经失败的调用，也不能重复上报失败。
+- apply 之后的 worker 退出、worker 报错事件或调用截止时间会让所有未决调用失败，并通过后端的崩溃回调上报恰好一次失败，原因分别为 `exit`、`error` 或 `timeout`。apply 完成前到达的失败通过被拒绝的启动 Promise 交给加载器，加载器主动请求的停止不算失败。加载器撤销插件的注册、清空实例并把记录标记为 `failed`；`reload` 或 `enable` 会启动新的 worker，不会自动重启插件。
+- 后端在执行声明的注册之后会检查 worker 是否仍然存活。worker 在 apply 握手期间退出会让 apply 失败，所以插件不会在 worker 已死的情况下被记录为 `applied`。
 - worker 不能同步回调宿主，因为宿主导入无法跨线程返回。v1 基于声明，所以这不损失能力。
 - 传给 worker 的参数会被投影成纯数据，因为 `postMessage` 使用结构化克隆，遇到 `AbortSignal` 这类宿主对象会抛错。[ABI-unified](../ABI-unified.zh.md) 第 3.4 节的投影适用。
 - 后端默认关闭。必须在 WebAssembly 插件启动前把加载器选项 `wasm.enabled` 设为 `true`；操作者参考见 [CONTEXT](../../CONTEXT.md)。

@@ -33,6 +33,7 @@ import { syncPythonEnvironment } from './python-env.js'
 import type { PythonEnvironment } from './python-env.js'
 import { PLUGIN_STATE, profilePluginsDir, resolveProfileDir, resolveRoots } from './contract.js'
 import { WasmBackendInstance } from './backends/wasm.js'
+import type { WasmFailure } from './backends/wasm.js'
 import { createStatusTool } from './tools/status.js'
 import { createManagementTools } from './tools/manage.js'
 import { DEFAULT_COMMAND_NAME, registerMloaderCommand } from './commands/mloader.js'
@@ -452,7 +453,10 @@ export class PluginManager {
         enablePyc: this.config.enablePyc,
         onCrash: (pluginId, info) => this.#onPythonCrash(record, pluginId, info),
       })
-      : new WasmBackendInstance(spec, { logger: this.logger })
+      : new WasmBackendInstance(spec, {
+        logger: this.logger,
+        onCrash: (pluginId, failure) => this.#onWasmCrash(record, pluginId, failure),
+      })
     record.instance = instance
     await instance.start()
 
@@ -545,13 +549,34 @@ export class PluginManager {
   }
 
   /**
+   * Revoke a failed backend's registrations and mark its record failed.
+   *
+   * The backend has already stopped itself, so only the handle is cleared
+   * here: keeping it would make a later `enable()` believe a backend is still
+   * running and silently refuse the retry. A reload or an enable replaces the
+   * record, so a late callback from an instance the record no longer owns is
+   * ignored instead of touching the replacement.
+   *
+   * @param record - Record that owned the failed backend.
+   * @param detail - Failure description stored on the record.
+   */
+  #onBackendCrash(record: PluginRegistrar, detail: string): void {
+    if (this.records.get(record.spec.id) !== record) return
+    record.dispose()
+    record.instance = null
+    record.state = PLUGIN_STATE.FAILED
+    record.error = detail
+  }
+
+  /**
    * Handle the unexpected exit of a plugin process.
    *
-   * The dead plugin's registrations are revoked and it is marked failed. The
-   * loader and the other hosted plugins are not affected, and nothing restarts
-   * the crashed plugin on its own. The backend stopped itself when its process
-   * exited, so its handle is cleared here too: keeping it would make a later
-   * `enable()` believe a backend is still running and silently refuse the retry.
+   * The loader and the other hosted plugins are not affected, and nothing
+   * restarts the crashed plugin on its own.
+   *
+   * @param record - Record that owned the process.
+   * @param pluginId - Plugin id used in the log lines.
+   * @param info - Exit status and signal.
    */
   #onPythonCrash(
     record: PluginRegistrar,
@@ -562,10 +587,24 @@ export class PluginManager {
     this.out.warn(
       `plugin ${pluginId} process exited (code=${info.code}, signal=${info.signal}); registrations revoked`,
     )
-    record.dispose()
-    record.instance = null
-    record.state = PLUGIN_STATE.FAILED
-    record.error = `process exited (code=${info.code}, signal=${info.signal})`
+    this.#onBackendCrash(record, `process exited (code=${info.code}, signal=${info.signal})`)
+  }
+
+  /**
+   * Handle an unexpected WebAssembly worker failure.
+   *
+   * The backend terminated the worker itself before reporting, so the record
+   * only needs the shared crash handling. The reason prefixes the stored error
+   * because the three failure kinds share one record field.
+   *
+   * @param record - Record that owned the worker.
+   * @param pluginId - Plugin id used in the log lines.
+   * @param failure - Failure category and detail.
+   */
+  #onWasmCrash(record: PluginRegistrar, pluginId: string, failure: WasmFailure): void {
+    this.logger?.warn?.(`[${pluginId}] wasm worker failed (${failure.reason}): ${failure.message}`)
+    this.out.warn(`plugin ${pluginId} worker failed (${failure.reason}); registrations revoked`)
+    this.#onBackendCrash(record, `${failure.reason}: ${failure.message}`)
   }
 
   /** Return a status snapshot of every tracked plugin, in tracking order. */

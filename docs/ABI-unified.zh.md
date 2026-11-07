@@ -288,7 +288,7 @@ WebAssembly 后端没有入站请求通道，所以不发送任何插件载荷�
 | 情况 | 行为 |
 | --- | --- |
 | WebAssembly 模块初始化、`boot` 或 `apply` 超过 `startupMs`（默认 10000 ms） | 加载器停止后端，把插件标记为 `failed`，其他插件不受影响。 |
-| `tool.call` 或事件投递超过 `callMs`（默认 30000 ms） | 调用返回错误。实例随后怎样处理取决于后端：Python 进程继续存活（[`PyABI 第 7 节`](python-sdk/PyABI.zh.md#7-截止时间与失败)），WebAssembly worker 被终止（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)）。 |
+| `tool.call` 或事件投递超过 `callMs`（默认 30000 ms） | 调用返回错误。实例随后怎样处理取决于后端：Python 进程继续存活（[`PyABI 第 7 节`](python-sdk/PyABI.zh.md#7-截止时间与失败)），WebAssembly worker 被终止并上报失败，所以插件变为 `failed`，注册被撤销（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)）。 |
 | 后端崩溃 | 插件的注册被撤销，状态变为 `failed`。dsh 和其他插件继续运行。 |
 | 插件请求非法 | 以 `ok:false` 拒绝，插件可以看到拒绝。 |
 | 请求无法送达 | 立即以 `transport` 错误失败，而不是等待截止时间。 |
@@ -317,7 +317,7 @@ discovered -> loaded -> applied -> disposed
 - 账本关闭后尝试的注册会立即被销毁，而不是悬空。
 - 对不是 `applied` 的插件调用工具会失败，错误会指出当前状态。
 - `reload` 撤销账本，停止后端实例并启动新实例。新实例重新加载插件，所以模块级状态不会跨重新加载保留。
-- 崩溃的插件变成 `failed`，不会自动重启。操作者可以通过加载器可选的 `mloader` 服务重新加载它，或重启 dsh。
+- 崩溃的插件变成 `failed`，不会自动重启。对 WebAssembly 后端，worker 退出、报错或超过调用截止时间都遵循同一规则：注册被撤销，实例被丢弃，记录变为 `failed`。操作者可以通过加载器可选的 `mloader` 服务重新加载它，或重启 dsh。
 - 加载器运行期间目录被删除的插件变成 `disposed`，不再列出。运行期间创建的目录走与启动时相同的启动路径，包括 `enabled: false` 和 `autoEnable: false` 规则。
 
 ## 6. 后端接口
@@ -365,7 +365,7 @@ interface RegistrarHandle {
 | 超时执行 | 请求截止时间；启动超时时杀死进程 | 终止 worker |
 | 同步宿主回调 | 原则上可能，SDK 不使用 | 不可能；worker 不能跨线程回调 |
 
-后端必须永远不让插件代码占用宿主主线程，启动失败时必须回收它创建的进程或 worker，并且必须通过让未决调用失败来暴露崩溃，以便加载器撤销插件的注册。
+后端必须永远不让插件代码占用宿主主线程，启动失败时必须回收它创建的进程或 worker，并且必须在 apply 之后出现意外失败时让所有未决调用失败，向上报一次失败。加载器随后撤销插件的注册、把它标记为 `failed` 并丢弃实例句柄。加载器主动请求的停止不算失败。
 
 ## 7. 安全模型
 
@@ -375,7 +375,7 @@ interface RegistrarHandle {
 | 文件系统 | 默认完全访问 | 无访问（没有 WASI 预打开目录） |
 | 网络 | 默认允许 | 无访问 |
 | 崩溃隔离 | 进程级；宿主不受影响 | 线程级；宿主不受影响 |
-| 无限循环 | 启动期间的循环会在启动超时被杀；调用期间的循环会让该调用失败，进程继续存活 | 初始化循环会在启动超时被终止；调用期间的循环会终止 worker（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)） |
+| 无限循环 | 启动期间的循环会在启动超时被杀；调用期间的循环会让该调用失败，进程继续存活 | 初始化循环会在启动超时被终止；调用期间的循环会终止 worker 并把插件标记为 `failed`（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)） |
 | 内存限制 | 加载器不施加 | worker 的 JavaScript 堆由 `maxOldGenerationSizeMb` 限制为 256 MB；WebAssembly 线性内存不受限制 |
 | 环境 | 已清理；清单 `env` 随后应用 | 不适用 |
 

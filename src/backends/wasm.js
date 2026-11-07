@@ -23,8 +23,10 @@ function messageOf(error) {
  *
  * The instance owns the worker from `start()` until `stop()`. A timeout
  * terminates the worker, because terminating it is the only mechanism that
- * stops a looping instance; the host then reports the call as failed and stays
- * running.
+ * stops a looping instance. After `apply` returned, an unexpected worker exit,
+ * a worker error or a timeout fails every pending call and is reported once
+ * through `onCrash`, so the loader can revoke the plugin's registrations and
+ * mark it failed.
  */
 export class WasmBackendInstance {
     /** Specification of the hosted plugin. */
@@ -32,19 +34,24 @@ export class WasmBackendInstance {
     /** Capabilities the manifest declared, carried for the loader's bookkeeping. */
     capabilities;
     logger;
+    onCrash;
     worker = null;
     stopped = false;
+    applied = false;
+    failed = false;
     seq = 0;
     pending = new Map();
     /**
      * Create the instance. The worker is not started until {@link start}.
      *
      * @param spec - Normalised plugin specification from discovery.
-     * @param options - Logger used for worker failures.
+     * @param options - Logger and crash callback used for worker failures.
      */
     constructor(spec, options = {}) {
+        const { logger, onCrash } = options;
         this.spec = spec;
-        this.logger = options.logger;
+        this.logger = logger;
+        this.onCrash = onCrash;
         this.capabilities = { tools: true, events: true, logger: true, effect: true };
     }
     /**
@@ -104,6 +111,7 @@ export class WasmBackendInstance {
                 if (message.type === 'ready') {
                     cleanup();
                     worker.on('message', (reply) => this.#onReply(reply));
+                    worker.on('error', (error) => this.#onWorkerError(worker, error));
                     worker.on('exit', (code) => this.#onWorkerExit(worker, code));
                     resolve(worker);
                 }
@@ -126,8 +134,50 @@ export class WasmBackendInstance {
         });
     }
     /**
-     * Handle the worker thread exiting: fail pending calls when it was not
-     * replaced or terminated by the host.
+     * Fail every pending call and terminate the worker after an unexpected
+     * failure. The failure is reported to the loader once, and only after the
+     * plugin was applied; a startup or apply failure reaches the loader through
+     * the rejected promise instead.
+     *
+     * @param reason - Failure category reported to the loader.
+     * @param message - Failure detail without the plugin id prefix.
+     */
+    #abort(reason, message) {
+        if (this.failed || this.stopped)
+            return;
+        this.failed = true;
+        const worker = this.worker;
+        // Clear the handle first, so a late reply or exit from the terminated
+        // worker is ignored instead of settling a call that already failed.
+        this.worker = null;
+        const error = new Error(`[${this.spec.id}] ${message}`);
+        for (const [id, entry] of this.pending) {
+            clearTimeout(entry.timer);
+            entry.reject(error);
+            this.pending.delete(id);
+        }
+        if (worker !== null) {
+            void worker.terminate().catch(() => {
+                // The worker may already be gone when termination races its exit.
+            });
+        }
+        this.logger?.error?.(`[${this.spec.id}] ${message}`);
+        if (this.applied)
+            this.onCrash?.(this.spec.id, { reason, message });
+    }
+    /**
+     * Handle an error event from the worker after the plugin was applied.
+     *
+     * @param worker - Worker that reported the error.
+     * @param error - Error the worker reported.
+     */
+    #onWorkerError(worker, error) {
+        if (this.worker !== worker)
+            return;
+        this.#abort('error', `wasm worker error: ${messageOf(error)}`);
+    }
+    /**
+     * Handle the worker thread exiting after the plugin was applied.
      *
      * @param worker - Worker that exited.
      * @param code - Exit code of the worker thread.
@@ -135,13 +185,7 @@ export class WasmBackendInstance {
     #onWorkerExit(worker, code) {
         if (this.worker !== worker)
             return;
-        this.logger?.warn?.(`[${this.spec.id}] wasm worker exited (code=${code})`);
-        this.worker = null;
-        for (const [id, entry] of this.pending) {
-            clearTimeout(entry.timer);
-            entry.reject(new Error(`[${this.spec.id}] wasm worker exited (code=${code})`));
-            this.pending.delete(id);
-        }
+        this.#abort('exit', `wasm worker exited (code=${code})`);
     }
     /**
      * Handle one reply from the worker.
@@ -180,8 +224,9 @@ export class WasmBackendInstance {
     /**
      * Send one request to the worker and wait for its reply.
      *
-     * The deadline is enforced by the host thread. On expiry the worker is
-     * terminated, because that is the only way to stop a looping instance.
+     * The deadline is enforced by the host thread. On expiry every pending call
+     * fails, the worker is terminated and the loader is told once, because
+     * terminating the worker is the only way to stop a looping instance.
      *
      * @param op - Operation name.
      * @param payload - Operation payload.
@@ -192,34 +237,31 @@ export class WasmBackendInstance {
      */
     #invoke(op, payload, timeoutMs) {
         const worker = this.worker;
-        if (worker === null || this.stopped) {
+        if (worker === null || this.stopped || this.failed) {
             return Promise.reject(new Error(`plugin ${this.spec.id} is not running`));
         }
         const id = ++this.seq;
         return new Promise((resolve, reject) => {
-            const timer = setTimeout(async () => {
-                this.pending.delete(id);
-                this.logger?.error?.(`[${this.spec.id}] wasm "${op}" exceeded ${timeoutMs}ms; terminating worker`);
-                // The worker handle is cleared before terminating, so a late reply is
-                // ignored instead of resolving a call the host already failed.
-                this.worker = null;
-                try {
-                    await worker.terminate();
-                }
-                catch {
-                    // The worker already exited.
-                }
-                reject(new Error(`[${this.spec.id}] wasm call "${op}" timed out after ${timeoutMs}ms `
-                    + '(worker terminated; the plugin may contain an infinite loop)'));
+            let entry;
+            const timer = setTimeout(() => {
+                // A stop or an earlier failure already settled this call; the timer
+                // must not report the plugin twice.
+                if (entry === undefined || this.pending.get(id) !== entry)
+                    return;
+                this.#abort('timeout', `wasm call "${op}" timed out after ${timeoutMs}ms `
+                    + '(worker terminated; the plugin may contain an infinite loop)');
             }, timeoutMs);
-            this.pending.set(id, { resolve, reject, timer });
+            entry = { resolve, reject, timer };
+            this.pending.set(id, entry);
             try {
                 worker.postMessage({ id, op, payload });
             }
             catch (error) {
-                clearTimeout(timer);
-                this.pending.delete(id);
-                reject(new Error(`[${this.spec.id}] postMessage failed: ${messageOf(error)}`));
+                if (this.pending.get(id) === entry) {
+                    clearTimeout(timer);
+                    this.pending.delete(id);
+                    reject(new Error(`[${this.spec.id}] postMessage failed: ${messageOf(error)}`));
+                }
             }
         });
     }
@@ -229,7 +271,8 @@ export class WasmBackendInstance {
      *
      * @param registrar - Ledger that performs the real registrations.
      * @returns The registered tool names and event names.
-     * @throws {Error} When the call fails or times out.
+     * @throws {Error} When the call fails or times out, or the worker exits while
+     *   the registrations are being performed.
      */
     async apply(registrar) {
         const result = await this.#invoke('apply', { inject: this.spec.inject }, this.spec.timeouts.startupMs);
@@ -241,6 +284,14 @@ export class WasmBackendInstance {
         for (const event of events) {
             await registrar.handle('events.on', { event });
         }
+        // The worker can die while the host performs these registrations, and no
+        // pending call exists to fail in that window. Reporting the plugin as
+        // applied would leave a dead backend behind a registered tool, so the
+        // apply handshake reports the exit instead and the loader marks it failed.
+        if (this.worker === null || this.stopped) {
+            throw new Error(`[${this.spec.id}] wasm worker exited during apply`);
+        }
+        this.applied = true;
         return {
             tools: tools.map((tool) => tool.name),
             events: events,
@@ -281,7 +332,8 @@ export class WasmBackendInstance {
      * Stop the backend: fail pending calls and terminate the worker.
      *
      * Idempotent. The worker handle is cleared first, so a late message from a
-     * terminated worker is ignored.
+     * terminated worker is ignored. A stop requested by the loader is not a
+     * failure and is never reported through `onCrash`.
      *
      * @param _reason - Ignored; a worker has no graceful shutdown channel.
      */
