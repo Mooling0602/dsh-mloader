@@ -206,6 +206,7 @@ async function main() {
     for (const fragment of ['共 {count} 个', '{count} 运行中', '{count} 已停用', '{count} 异常']) {
       assert.ok(values.includes(fragment), fragment)
     }
+    assert.ok(values.includes('{n} 个命令'), 'commands count')
     assert.ok(values.some((value) => value.includes('{name}')), 'switch aria-label')
   })
   await check('apply returns early without the client services', () => {
@@ -352,6 +353,7 @@ async function main() {
     state: 'applied',
     tools: ['hello_add', 'hello_mloader'],
     events: [],
+    commands: ['hello-mloader', 'hello-add'],
     registrations: 2,
   }
 
@@ -370,7 +372,7 @@ async function main() {
     assert.ok(texts.includes('py-hello'))
     assert.ok(texts.includes('Python Hello'))
     assert.ok(texts.includes('stateApplied'))
-    assert.ok(texts.some((text) => text.includes('python') && text.includes('toolsCount')))
+    assert.ok(texts.some((text) => text.includes('python') && text.includes('toolsCount') && text.includes('commandsCount')))
     assert.ok(texts.some((text) => text.includes('partsCountTotal')))
   })
   await check('an empty plugin list shows the empty state', () => {
@@ -410,6 +412,7 @@ async function main() {
     const rows = replacement.next([applied])
     assert.equal(rows.length, 1)
     assert.equal(rows[0].state, 'disabled')
+    assert.deepEqual(rows[0].commands, ['hello-mloader', 'hello-add'])
     const pending = updates.filter((update) => update.index === 4)
     assert.deepEqual(pending.map((update) => update.next), ['py-hello', ''])
   })

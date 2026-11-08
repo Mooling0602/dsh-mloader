@@ -67,6 +67,7 @@ const DICTIONARIES = {
         switching: '切换中…',
         switchAria: '启用外部插件 {name}',
         toolsCount: '{n} 个工具',
+        commandsCount: '{n} 个命令',
         partsCountTotal: '共 {count} 个',
         partsCountRunning: '{count} 运行中',
         partsCountOff: '{count} 已停用',
@@ -106,6 +107,7 @@ const DICTIONARIES = {
         switching: 'Switching…',
         switchAria: 'Enable external plugin {name}',
         toolsCount: '{n} tools',
+        commandsCount: '{n} commands',
         partsCountTotal: '{count} total',
         partsCountRunning: '{count} running',
         partsCountOff: '{count} off',
@@ -292,6 +294,7 @@ function toSnapshot(value) {
         state,
         tools: toStringList(record.tools),
         events: toStringList(record.events),
+        commands: toStringList(record.commands),
         registrations: typeof record.registrations === 'number' ? record.registrations : 0,
         ...(typeof record.error === 'string' ? { error: record.error } : {}),
     };
@@ -590,7 +593,7 @@ function createClientCore(deps) {
             // overwrite a row with an older snapshot.
             const busy = pendingId !== '';
             const children = [
-                react.createElement('div', { key: 'line', style: ROW_LINE_STYLE }, react.createElement('span', { key: 'icon', style: ROW_ICON_STYLE, 'aria-hidden': true }, react.createElement(primitives.PluginArtworkDefault, { key: 'art', size: 30 })), react.createElement('div', { key: 'main', style: ROW_MAIN_STYLE }, react.createElement('span', { key: 'name', style: on ? ROW_NAME_STYLE : ROW_NAME_OFF_STYLE }, displayName(plugin)), react.createElement('code', { key: 'id', style: ROW_MODULE_STYLE }, plugin.id), react.createElement('span', { key: 'meta', style: ROW_MODULE_STYLE }, `${plugin.backend} · ${t('toolsCount', { n: String(plugin.tools.length) })}`)), react.createElement('span', {
+                react.createElement('div', { key: 'line', style: ROW_LINE_STYLE }, react.createElement('span', { key: 'icon', style: ROW_ICON_STYLE, 'aria-hidden': true }, react.createElement(primitives.PluginArtworkDefault, { key: 'art', size: 30 })), react.createElement('div', { key: 'main', style: ROW_MAIN_STYLE }, react.createElement('span', { key: 'name', style: on ? ROW_NAME_STYLE : ROW_NAME_OFF_STYLE }, displayName(plugin)), react.createElement('code', { key: 'id', style: ROW_MODULE_STYLE }, plugin.id), react.createElement('span', { key: 'meta', style: ROW_MODULE_STYLE }, `${plugin.backend} · ${t('toolsCount', { n: String(plugin.tools.length) })} · ${t('commandsCount', { n: String(plugin.commands.length) })}`)), react.createElement('span', {
                     key: 'state',
                     style: plugin.state === 'failed' ? ROW_STATE_FAILED_STYLE : ROW_STATE_STYLE,
                 }, react.createElement(primitives.StateDot, { key: 'dot', state: STATE_DOTS[plugin.state] }), pending ? t('switching') : stateLabel(t, plugin.state)), react.createElement(primitives.Switch, {
