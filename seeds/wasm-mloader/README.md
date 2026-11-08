@@ -33,7 +33,8 @@ The loader watches the plugin root and mounts the directory. If watching is disa
 ## What the example demonstrates
 
 - The core WebAssembly ABI exports: `memory`, `mloader_alloc`, `mloader_free`, `mloader_call`, `mloader_result_ptr` and `mloader_abi_version`.
-- The declaration and JSON request contract for `apply`, `tool.call` and `event`.
+- The declaration and JSON request contract for `apply`, `tool.call`, `command.call` and `event`.
 - Two tools, `wasm_add` and `wasm_upper`.
+- Two commands, `/wasm-add` and `/wasm-upper`. Each returns multi-line text so the dsh chat card can expand it, and an invalid input returns a single-line usage error.
 
 The WebAssembly backend has no logging, effect or synchronous host-call channel, so the example does not pretend to have one.

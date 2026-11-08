@@ -1,8 +1,9 @@
 //! Source-only WebAssembly example plugin for dsh-mloader.
 //!
 //! The module implements the six core exports documented in
-//! `docs/wasm/WasmABI.md` and exchanges JSON through linear memory. It does not
-//! import WASI and does not call back into the host.
+//! `docs/wasm/WasmABI.md` and exchanges JSON through linear memory. It declares
+//! two tools and two commands, does not import WASI and does not call back into
+//! the host.
 //!
 //! The `mloader_abi_version` export reports the core ABI version this module
 //! targets; the host rejects a module that reports a version it does not support.
@@ -25,6 +26,13 @@ struct ToolCall {
     tool: String,
     #[serde(default)]
     args: Value,
+}
+
+#[derive(Deserialize)]
+struct CommandCall {
+    command: String,
+    #[serde(default)]
+    input: String,
 }
 
 /// Result buffer owned by the plugin and valid until the next request.
@@ -94,6 +102,10 @@ fn handle_request(request: Request) -> Value {
             Ok(call) => call_tool(&call),
             Err(error) => error_reply(format!("invalid tool.call payload: {error}")),
         },
+        "command.call" => match serde_json::from_value::<CommandCall>(request.payload) {
+            Ok(call) => call_command(&call),
+            Err(error) => error_reply(format!("invalid command.call payload: {error}")),
+        },
         "event" => json!({ "ok": true, "result": null }),
         other => error_reply(format!("unsupported op {other:?}")),
     }
@@ -130,6 +142,20 @@ fn declarations() -> Value {
                     }
                 }
             ],
+            "commands": [
+                {
+                    "id": "wasm-add",
+                    "names": ["wasm-add"],
+                    "description": "Add two numbers (WASM implementation).",
+                    "input": { "hint": "a b" }
+                },
+                {
+                    "id": "wasm-upper",
+                    "names": ["wasm-upper"],
+                    "description": "Upper-case a string (WASM implementation).",
+                    "input": { "hint": "text" }
+                }
+            ],
             "events": []
         }
     })
@@ -148,6 +174,48 @@ fn call_tool(call: &ToolCall) -> Value {
         }
         other => error_reply(format!("unknown tool {other:?}")),
     }
+}
+
+fn call_command(call: &CommandCall) -> Value {
+    let result = match call.command.as_str() {
+        "wasm-add" => command_add(&call.input),
+        "wasm-upper" => command_upper(&call.input),
+        other => return error_reply(format!("unknown command node {other:?}")),
+    };
+    json!({ "ok": true, "result": result })
+}
+
+fn command_add(input: &str) -> Value {
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.len() != 2 {
+        return command_error("Usage: /wasm-add <a> <b>");
+    }
+    let (Ok(a), Ok(b)) = (parts[0].parse::<f64>(), parts[1].parse::<f64>()) else {
+        return command_error("Usage: /wasm-add <a> <b>");
+    };
+    command_success(format!(
+        "{a} + {b} = {}\nwasm-mloader example (rust, source-built)",
+        a + b
+    ))
+}
+
+fn command_upper(input: &str) -> Value {
+    let text = input.trim();
+    if text.is_empty() {
+        return command_error("Usage: /wasm-upper <text>");
+    }
+    command_success(format!(
+        "{}\nwasm-mloader example (rust, source-built)",
+        text.to_uppercase()
+    ))
+}
+
+fn command_success(text: String) -> Value {
+    json!({ "kind": "success", "text": text })
+}
+
+fn command_error(text: &str) -> Value {
+    json!({ "kind": "error", "text": text })
 }
 
 fn error_reply(message: String) -> Value {
