@@ -33,6 +33,7 @@ Public names exported by `dsh_mloader_sdk`:
 | --- | --- | --- |
 | `plugin` | decorator | Marks the entry function `apply(ctx)`. |
 | `tool` | decorator | Declares a tool without an `apply` function. |
+| `command` | decorator | Declares a slash command node without an `apply` function. |
 | `ctx` | proxy | The capability context. An attribute lookup is forwarded to the active context, and it raises `HostUnavailable` before boot. |
 | `get_context()` | function | Returns the active `Context`, or `None` before boot. |
 | `Context` | class | Type of the context object, for annotations. |
@@ -65,6 +66,7 @@ The manifest `entry` field names the entry file. Discovery resolves it to an abs
 - A module level `apply` function is honored when it is not decorated with `@plugin`. A decorated entry function takes precedence over a plain `apply`.
 - `@plugin(name="...")` is accepted for readability but has no effect: the manifest is the identity authority.
 - A module level `TOOLS` list is honored. Each entry requires `name`, `description` and `handler`; `parameters`, `output` and `timeoutMs` are optional.
+- A module level `COMMANDS` list is honored. Each entry requires `names`, `description` and `handler`; `input_hint` and `node_id` are optional.
 
 The package layout implications are specified in [Package](Package.md) section 1.
 
@@ -96,6 +98,14 @@ def apply(ctx: Context):
     def greet(args):
         return {"text": f"hello {args['who']}"}
 
+    @ctx.commands.register(
+        names=["my-command", "my-plugin-command"],
+        description="Run the plugin from the command line.",
+        input_hint="text",
+    )
+    def run(input):
+        return f"plugin saw {input.strip()}"
+
     @ctx.on("tools/execute")
     def observe(payload):
         ctx.logger.debug(f"tool executed: {payload}")
@@ -108,7 +118,7 @@ def apply(ctx: Context):
 The plugin declares tools as decorated functions and needs no entry function.
 
 ```python
-from dsh_mloader_sdk import tool
+from dsh_mloader_sdk import command, tool
 
 @tool(
     name="add",
@@ -122,26 +132,39 @@ from dsh_mloader_sdk import tool
 )
 def add(args):
     return {"sum": args["a"] + args["b"]}
+
+@command(
+    names=["my-plugin-run", "my-plugin-command"],
+    description="Run the plugin from the command line.",
+    input_hint="text",
+)
+def run(input):
+    return f"plugin saw {input.strip()}"
 ```
 
 `@tool` takes the name as its first positional argument and the description as its second, so a call that supplies only a description fails at import time. The keyword form in the example is equivalent.
 
+`@command` takes the candidate names as its first positional argument and the description as its second. The first candidate is the node id unless `node_id` is supplied.
+
 ### 3.3 Mixing and ordering
 
-Both styles may be mixed in one plugin. Declared tools are registered first, then the entry function runs. A registration request is synchronous: it returns after the host acknowledged it, and a rejection raises `PluginCallError` at the call site. A failed apply handshake stops the process.
+Both styles may be mixed in one plugin. Declared tools are registered first, then declared commands, then the entry function runs. A command node that the retreat rule skips does not fail the handshake. A registration request is synchronous: it returns after the host acknowledged it, and a rejection raises `PluginCallError` at the call site. A failed apply handshake stops the process.
 
 ### 3.4 The context surface
 
-`apply(ctx)` receives one `Context` with four namespaces, and `ctx` from the package root proxies the same object.
+`apply(ctx)` receives one `Context` with five namespaces, and `ctx` from the package root proxies the same object.
 
 | Namespace | Call | Contract |
 | --- | --- | --- |
 | `ctx.tools` | `register(name, description, parameters=None, output=None, timeout_ms=None)` | Returns a decorator that records the handler under `name`. The tool payload is specified in [ABI-unified](../ABI-unified.md) section 3.2. |
+| `ctx.commands` | `register(names, description, input_hint=None, node_id=None)` | Returns a decorator that declares one command node. `names` is a string or a list of candidate names in priority order. The payload and the retreat rule are specified in section 3.6 of the same document. |
 | `ctx.on` | `on(event)` or `ctx.on(event)` | Returns a decorator that subscribes the handler to one whitelisted event. The whitelist, the arity rules and the fire-and-forget rule are in section 3.3 of the same document. |
 | `ctx.logger` | `debug`, `info`, `warn`, `error` with `(message, data=None)` | Sends a one-way notification. It never waits for a reply and never raises. It is the only route from a plugin to the loader logger, and it stays available while a cleanup runs. |
 | `ctx.effect` | `register(label, cleanup=None)` | Records a cleanup that runs when the plugin is disposed. Cleanups run in reverse registration order, and one failing cleanup does not stop the rest. |
 
 A tool handler is called with one argument, the object the model supplied. It must return a JSON serialisable value; the declared `output` schema or the inferred one validates it. An event handler follows the arity rule in [ABI-unified](../ABI-unified.md) section 3.3: zero parameters calls it with no argument, one parameter passes the first projected argument, and more than one passes every projected argument.
+
+A command handler is called with one argument, the raw text after the registered command name. It may return a string, which becomes a successful text result, or a dict with `kind` (`success` or `error`) and `text`. A raised exception becomes an error result for that invocation and does not stop the process.
 
 ## 4. Result schema inference
 
@@ -174,6 +197,8 @@ An explicit `output` argument always wins. A plugin that needs a schema the tabl
 | --- | --- |
 | A tool handler raises | The `tool.call` reply is `ok:false` with the exception message. The plugin process stays alive. |
 | An unknown tool is called | The reply is `ok:false` with an error message naming the tool. |
+| A command handler raises | The `command.call` reply is `ok:false` with the exception message, and the host renders it as an error result. The plugin process stays alive. |
+| An unknown command node is called | The reply is `ok:false` with an error message naming the node. |
 | A registration is rejected | The call site inside `apply` raises `PluginCallError`. The apply handshake then fails. |
 | The plugin module fails to import | The boot reply is `ok:false` with `import failed: ...`, and the process exits with status 1. |
 | A cleanup raises | The traceback goes to the runtime diagnostics stream and the remaining cleanups still run. |
@@ -215,13 +240,17 @@ sequenceDiagram
     Note right of P: load the entry module
     P->>H: ready (pluginId, python)
     H->>P: apply (inject)
-    Note right of P: register declared tools,\nthen run apply(ctx)
+    Note right of P: register declared tools and commands,\nthen run apply(ctx)
     P->>H: tools.register (request)
     H->>P: ack (ok:true)
     P->>H: events.on (request)
     H->>P: ack (ok:true)
+    P->>H: commands.register (request)
+    H->>P: ack (ok:true)
     P->>H: apply result (tools, events)
     H->>P: tool.call (tool, args)
+    P->>H: result
+    H->>P: command.call (command, input)
     P->>H: result
     H->>P: event (event, args)
     P->>H: result
@@ -238,14 +267,14 @@ The runtime does not validate the manifest. Manifest validation happens during d
 | Situation | Behavior |
 | --- | --- |
 | `boot` or `apply` exceeds `startupMs` (default 10000 ms) | The loader kills the process and marks the plugin `failed`. Other plugins are unaffected. |
-| `tool.call` or event delivery exceeds `callMs` (default 30000 ms) | The call returns an error and the process stays alive. A tool timeout does not kill the plugin. |
+| `tool.call`, `command.call` or event delivery exceeds `callMs` (default 30000 ms) | The call returns an error and the process stays alive. A tool or command timeout does not kill the plugin. |
 | The process crashes, including `os._exit()` | The plugin's registrations are revoked and its state becomes `failed`. dsh and the other plugins continue. |
 | A plugin request is invalid | It is rejected with `ok:false`, and the plugin can observe the rejection. |
 | A frame cannot be delivered | The request fails immediately with a `transport` error instead of waiting for the timeout. |
 | A non-protocol line appears on `stdout` | The line is skipped and a warning is logged. This is a defence for output that bypassed the runtime, not a plugin output route. |
 | `dispose` does not answer within 1000 ms | The loader sends SIGTERM, waits at most 2000 ms, then sends SIGKILL. |
 
-The two deadlines come from the manifest: `timeouts.startupMs` covers `boot` and `apply`, and `timeouts.callMs` covers `tool.call` and event delivery.
+The two deadlines come from the manifest: `timeouts.startupMs` covers `boot` and `apply`, and `timeouts.callMs` covers `tool.call`, `command.call` and event delivery.
 
 ## 8. Reload and bytecode
 

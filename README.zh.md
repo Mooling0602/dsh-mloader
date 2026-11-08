@@ -43,7 +43,7 @@ dsh plugin --profile web remove dsh-mloader
 [mloader] ready: 1 plugin(s) mounted
 ```
 
-之后让模型调用 `hello_mloader` 或 `hello_add`，或者直接输入 `/mloader`。这个示例由加载器维护：每次启动都会替换已安装的副本，`hello-mloader` 这个 id 专供它使用。
+之后让模型调用 `hello_mloader` 或 `hello_add`，或者输入 `/hello-mloader Ada` 执行示例命令。`/mloader` 列出被托管的插件。这个示例由加载器维护：每次启动都会替换已安装的副本，`hello-mloader` 这个 id 专供它使用。
 
 ## 插件放在哪里
 
@@ -83,6 +83,8 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | 模型 | `mloader_status`、`mloader_info`、`mloader_load`、`mloader_unload` 和 `mloader_reload` 工具 |
 
 `/mloader` 列出全部插件，`/mloader <plugin-id>` 查看单个插件，`/mloader load <plugin-id>`、`/mloader unload <plugin-id>` 和 `/mloader reload <plugin-id>` 在运行时切换插件。只有已经装在 profile 里的插件才能被加载。
+
+被托管的插件也可以注册自己的斜杠命令。随包示例注册了 `/hello-mloader`。插件命令与 dsh 及其他插件共用一个全局命名空间：插件按优先级声明候选名，加载器注册第一个尚未被占用的名字。所有候选都被占用时，已存在的命令获胜，插件在没有该命令的情况下继续加载。
 
 在 web profile 下，dsh 的插件页面里 dsh-mloader bundle 的详情页有一个「外部插件」区块，每个被托管的插件对应一个开关。开关立即生效，只在当前运行的 dsh 进程里有效：它不会修改插件目录，重启后每个插件都会回到清单文件声明的状态。插件必须先装在 profile 的插件目录里才会出现在这个区块里，开关本身不会安装任何东西。
 

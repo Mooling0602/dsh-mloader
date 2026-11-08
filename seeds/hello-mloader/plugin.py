@@ -14,11 +14,12 @@ The directory holds three files:
 ``.mloader.builtin.json``
     Marks the directory as the bundled example for the reserved id.
 
-The plugin demonstrates three capabilities of the runtime:
+The plugin demonstrates four capabilities of the runtime:
 
 1. Registering tools with ``ctx.tools.register``.
-2. Subscribing to host events with ``ctx.on``.
-3. Registering cleanup work with ``ctx.effect.register``.
+2. Registering a slash command with ``ctx.commands.register``.
+3. Subscribing to host events with ``ctx.on``.
+4. Registering cleanup work with ``ctx.effect.register``.
 
 Two rules apply to every handler:
 
@@ -111,6 +112,26 @@ def apply(ctx: Context):
         :rtype: dict
         """
         return {"a": args["a"], "b": args["b"], "sum": args["a"] + args["b"]}
+
+    @ctx.commands.register(
+        names="hello-mloader",
+        description="Greet someone from the slash command line.",
+        input_hint="who",
+    )
+    def hello_mloader_command(input):
+        """Greet the requested target from a command.
+
+        The command is registered in the global command namespace. If another
+        plugin already took this name, the loader keeps the existing command
+        and skips this one.
+
+        :param input: Text after the command name.
+        :type input: str
+        :returns: A successful command result.
+        :rtype: dict
+        """
+        who = input.strip() or "world"
+        return {"kind": "success", "text": f"Hello, {who}!"}
 
     @ctx.on("tools/execute")
     def on_tool_execute(payload):

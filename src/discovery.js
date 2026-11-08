@@ -68,6 +68,7 @@ async function readManifest(path) {
             events: capabilities.events !== false,
             logger: capabilities.logger !== false,
             effect: capabilities.effect !== false,
+            commands: capabilities.commands !== false,
         },
         timeouts: {
             startupMs: finiteNumber(timeouts.startupMs, 10_000),

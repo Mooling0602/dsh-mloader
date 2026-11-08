@@ -95,6 +95,7 @@ async function readManifest(path: string): Promise<PluginSpec> {
       events: capabilities.events !== false,
       logger: capabilities.logger !== false,
       effect: capabilities.effect !== false,
+      commands: capabilities.commands !== false,
     } satisfies PluginCapabilities,
     timeouts: {
       startupMs: finiteNumber(timeouts.startupMs, 10_000),

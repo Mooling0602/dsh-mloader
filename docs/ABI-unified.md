@@ -34,7 +34,7 @@ Operator configuration and implementation detail are not part of this contract. 
 
 1. **The loader is an ordinary Cordis plugin.** It does not change the dsh loader, the bundle mechanism or `import()`, and it replaces no existing plugin.
 2. **An external plugin is not a Cordis plugin.** It creates no Cordis plugin entity, no fiber node and no per-plugin `ctx` scope, and it never appears in a dsh plugin list. It sends registration intents over the protocol in this document, and the loader performs the real registrations on its own `ctx`.
-3. **The capability surface is a whitelist, not a passthrough.** Only the four operations in §3 are reachable. Every other `ctx` facility is unavailable by design.
+3. **The capability surface is a whitelist, not a passthrough.** Only the five operations in §3 are reachable. Every other `ctx` facility is unavailable by design.
 4. **Registrations are revocable.** Every registration a plugin causes belongs to that plugin's ledger and is revoked when the plugin unloads.
 5. **External code never occupies the host main thread.** Python runs in a child process, WebAssembly runs in a worker thread, and the host continues its own execution chain without waiting for a plugin.
 
@@ -81,7 +81,7 @@ The manifest is the authoritative source of plugin identity and backend selectio
   "entry": "plugin.py",
   "enabled": true,
   "inject": [],
-  "capabilities": { "tools": true, "events": true, "logger": true, "effect": true },
+  "capabilities": { "tools": true, "events": true, "logger": true, "effect": true, "commands": true },
   "timeouts": { "startupMs": 10000, "callMs": 30000 },
   "env": {}
 }
@@ -97,7 +97,7 @@ The manifest is the authoritative source of plugin identity and backend selectio
 | `targets` | conditionally | array | none | WebAssembly package targets, specified in [wasm/Package](wasm/Package.md) section 1. It is required for an installable WebAssembly package and absent for a directory-installed plugin. It is valid only with `"backend": "wasm"`, and a manifest with `targets` has no top-level `entry`. |
 | `enabled` | no | boolean | `true` | When `false`, the plugin is discovered and reported but not started. |
 | `inject` | no | string[] | `[]` | Metadata forwarded to the plugin in its startup payloads. It grants no capability and resolves no host service. |
-| `capabilities` | no | object | all `true` | Switches `tools`, `events`, `logger` and `effect`. They are declared metadata: v1 does not enforce them, so setting one to `false` states intent only. The enforced boundaries are the registration operation whitelist in §3 and the event whitelist in §3.3. |
+| `capabilities` | no | object | all `true` | Switches `tools`, `events`, `logger`, `effect` and `commands`. They are declared metadata: v1 does not enforce them, so setting one to `false` states intent only. The enforced boundaries are the registration operation whitelist in §3 and the event whitelist in §3.3. |
 | `timeouts.startupMs` | no | number | `10000` | Deadline for the startup handshake and WebAssembly module initialization, in milliseconds. |
 | `timeouts.callMs` | no | number | `30000` | Deadline for one tool call or one event delivery, in milliseconds. |
 | `env` | no | object | `{}` | Extra environment variables for a Python child process. Values are converted to strings. Ignored by the WebAssembly backend. |
@@ -122,11 +122,11 @@ The roots are watched while the loader runs. A plugin directory that appears is 
 
 ### 2.3 Declaring capabilities
 
-An external plugin reaches the capability surface through its backend's channel. The four operations of §3 are the whole surface, and a backend realizes the subset its channel supports. The Python backend sends each operation as a request frame during apply or after it ([PyABI §6](python-sdk/PyABI.md#6-process-transport-and-handshake)), so it carries all four. The WebAssembly backend has no inbound channel: it returns its tool and event declarations as the apply result, and it has no logging or cleanup operation ([WasmABI §3](wasm/WasmABI.md#3-declarations)). The loader validates every declaration against §3 and records it in the plugin's ledger, whichever channel delivered it.
+An external plugin reaches the capability surface through its backend's channel. The five operations of §3 are the whole surface, and a backend realizes the subset its channel supports. The Python backend sends each operation as a request frame during apply or after it ([PyABI §6](python-sdk/PyABI.md#6-process-transport-and-handshake)), so it carries all five. The WebAssembly backend has no inbound channel: it returns its tool, event and command declarations as the apply result, and it has no logging or cleanup operation ([WasmABI §3](wasm/WasmABI.md#3-declarations)). The loader validates every declaration against §3 and records it in the plugin's ledger, whichever channel delivered it.
 
 ## 3. ctx capability whitelist
 
-### 3.1 The four operations
+### 3.1 The five operations
 
 | # | RPC operation | Semantics |
 | --- | --- | --- |
@@ -134,12 +134,13 @@ An external plugin reaches the capability surface through its backend's channel.
 | 2 | `events.on` | Subscribes to one whitelisted event. |
 | 3 | `logger.log` | One-way log notification. No reply is awaited. |
 | 4 | `effect.register` | Registers a cleanup that runs when the plugin unloads. |
+| 5 | `commands.register` | Declares a command node in the global slash command namespace. |
 
-The Python SDK exposes these operations as `ctx.tools.register`, `ctx.on`, `ctx.logger` and `ctx.effect.register` ([PyABI §3.4](python-sdk/PyABI.md#34-the-context-surface)). The Python backend carries all four. The WebAssembly backend carries tool and event declarations only; §2.3 states how it delivers them.
+The Python SDK exposes these operations as `ctx.tools.register`, `ctx.commands.register`, `ctx.on`, `ctx.logger` and `ctx.effect.register` ([PyABI §3.4](python-sdk/PyABI.md#34-the-context-surface)). The Python backend carries all five. The WebAssembly backend carries tool, event and command declarations; §2.3 states how it delivers them.
 
-Nothing else is reachable. `ctx.session`, `ctx.llm`, `ctx.subprocess`, `ctx.commands` and arbitrary `ctx.*` passthrough are not part of the contract, and a plugin cannot obtain them.
+Nothing else is reachable. `ctx.session`, `ctx.llm`, `ctx.subprocess` and arbitrary `ctx.*` passthrough are not part of the contract, and a plugin cannot obtain them.
 
-Slash commands are deliberately not available to external plugins. A command is a human-facing entry in a global namespace, so letting any external plugin register one would pollute the user's command list. The loader's own `/mloader` command is a registration made by the loader as a regular Cordis plugin, not a capability offered to plugins.
+Command names share one global namespace with the commands dsh and other plugins already registered. A command node declares candidate names in priority order, and the loader registers the first name that is not already taken. When every candidate is taken, the loader keeps the command that is already there and skips the node; the plugin keeps loading. Section 3.6 specifies the declaration, the fallback and the retreat rule. A plugin that wants a predictable name should declare an uncommon one, for example a name that carries its own id. The loader's own `/mloader` command is a registration made by the loader as a regular Cordis plugin, not a capability offered to plugins.
 
 ### 3.2 Tool registration
 
@@ -218,6 +219,30 @@ Tool parameters and tool output use the restricted schema subset the harness acc
 
 Everything else is rejected, including `format`, `minimum`, `maximum`, `pattern`, `$ref`, `anyOf`, `allOf`, `not`, `patternProperties` and `definitions`. The loader validates before registering and reports the plugin id, the tool name and the schema path, so a violation is attributable.
 
+### 3.6 Command registration
+
+A command node declares one human-facing entry in the global slash command namespace:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `id` | no | Stable node id used to route execution. Defaults to the first candidate name. |
+| `names` | yes | Non-empty array of candidate command names in priority order. Each matches `^[a-z][a-z0-9_-]{0,63}$`. |
+| `description` | yes | Non-empty summary shown in the command list. |
+| `input` | no | Object with a non-empty `hint` string, advertised as the input placeholder. |
+
+The loader registers the node through the optional dsh commands service:
+
+- The service is optional in dsh. When it is absent, every command node is skipped with a warning and the plugin stays `applied`.
+- Candidate names are tried in order. The first name that is not already registered in the global namespace wins; the remaining candidates stay unused.
+- When every candidate is already registered, the loader keeps the existing command and skips the node with a warning. The plugin stays `applied`. This is the retreat rule: an external plugin never replaces a command that is already there.
+- A malformed declaration, a repeated node id, or a registration failure that is not a name conflict fails the apply handshake.
+- The node id routes execution. The backend receives `command.call` with that id, so a change to the candidate names does not alter the handler binding.
+- The registration belongs to the plugin ledger and is revoked when the plugin unloads, disables or fails. A failed plugin therefore loses its commands together with its tools and events.
+
+A command handler receives the text after the registered command name, including the separator whitespace. It returns either a string, which becomes `{"kind": "success", "text": "..."}`, or an object with `kind` (`success` or `error`) and `text`. An error result is rendered by the dispatching UI. A thrown handler error or a command deadline is converted into an error result for that invocation.
+
+Command execution does not pass through the model and adds no authority: the handler runs with the same access the plugin already has. The backend receives `command.call` with the payload `{"command": <node id>, "input": <raw text>}` and answers with the result object.
+
 ## 4. RPC protocol
 
 The operation names and payload shapes below are shared by every backend. The frame envelope is the Python backend's framing of them ([PyABI §6](python-sdk/PyABI.md#6-process-transport-and-handshake)); the WebAssembly backend carries the same operations inside its own request and result buffers without the envelope ([WasmABI §2](wasm/WasmABI.md#2-request-and-result-contract)).
@@ -268,6 +293,7 @@ Host payloads:
 | `apply` | `inject` | `tools`: sorted registered tool names, `events`: sorted subscribed event names. |
 | `tool.call` | `tool`, `args` | The JSON value returned by the handler. |
 | `event` | `event`, projected `args` array | The handler return value. |
+| `command.call` | `command` (node id), `input` | The command result object with `kind` and `text`. |
 | `dispose` | `reason` | `disposed: true` after cleanups run; the process then exits. |
 
 Plugin payloads:
@@ -278,10 +304,11 @@ Plugin payloads:
 | `events.on` | `event` name from the whitelist. |
 | `logger.log` | `level` (`debug`, `info`, `warn` or `error`), `message`, optional `data`. |
 | `effect.register` | `label`. |
+| `commands.register` | `command` object as defined in §3.6. |
 
 An operation outside these lists is rejected with `ok:false` and an error message that names the whitelist.
 
-The WebAssembly backend has no inbound request channel, so it sends none of the plugin payload operations. It returns `tools` and `events` in its apply result instead. It is driven with `apply`, `tool.call` and `event` only: its initialization is the worker `ready` handshake, and its stop path terminates the worker without a `dispose` frame ([WasmABI §3](wasm/WasmABI.md#3-declarations), [WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)).
+The WebAssembly backend has no inbound request channel, so it sends none of the plugin payload operations. It returns `tools`, `events` and `commands` in its apply result instead. It is driven with `apply`, `tool.call`, `command.call` and `event` only: its initialization is the worker `ready` handshake, and its stop path terminates the worker without a `dispose` frame ([WasmABI §3](wasm/WasmABI.md#3-declarations), [WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)).
 
 ### 4.3 Deadlines and failures
 
@@ -289,11 +316,12 @@ The WebAssembly backend has no inbound request channel, so it sends none of the 
 | --- | --- |
 | WebAssembly module initialization, `boot`, or `apply` exceeds `startupMs` (default 10000 ms) | The loader stops the backend, marks the plugin `failed`, and leaves the other plugins unaffected. |
 | `tool.call` or event delivery exceeds `callMs` (default 30000 ms) | The call returns an error. What happens to the instance is backend-specific: the Python process stays alive ([PyABI §7](python-sdk/PyABI.md#7-deadlines-and-failures)), and the WebAssembly worker is terminated and the failure is reported, so the plugin becomes `failed` and its registrations are revoked ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)). |
+| `command.call` exceeds `callMs` (default 30000 ms) | The command invocation returns an error result. The Python process stays alive; the WebAssembly worker is terminated and the plugin becomes `failed` ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)). |
 | The backend crashes | The plugin's registrations are revoked and its state becomes `failed`. dsh and the other plugins continue. |
 | A plugin request is invalid | It is rejected with `ok:false`, and the plugin can observe the rejection. |
 | A request cannot be delivered | It fails immediately with a `transport` error instead of waiting for the deadline. |
 
-The two deadlines come from the manifest: `timeouts.startupMs` covers WebAssembly module initialization as well as `boot` and `apply`, and `timeouts.callMs` covers `tool.call` and event delivery. A backend enforces a deadline with the mechanism its isolation boundary provides; the backend document specifies that mechanism.
+The two deadlines come from the manifest: `timeouts.startupMs` covers WebAssembly module initialization as well as `boot` and `apply`, and `timeouts.callMs` covers `tool.call`, `command.call` and event delivery. A backend enforces a deadline with the mechanism its isolation boundary provides; the backend document specifies that mechanism.
 
 ## 5. Lifecycle and ownership
 
@@ -317,6 +345,7 @@ discovered -> loaded -> applied -> disposed
 - A registration attempted after the ledger is closed is disposed immediately rather than left dangling.
 - A tool call for a plugin that is not `applied` fails with an error that names the current state.
 - `reload` revokes the ledger, stops the backend instance and starts a fresh one. The new instance loads the plugin again, so module level state does not survive a reload.
+- Command registrations belong to the same ledger. Disabling, unloading or failing a plugin revokes its commands together with its tools and events, and a reload registers them again.
 - A crashed plugin becomes `failed` and is not restarted automatically. For the WebAssembly backend a worker that exits, reports an error or exceeds a call deadline follows the same rule: the registrations are revoked, the instance is dropped and the record becomes `failed`. An operator can reload it through the loader's optional `mloader` service or restart dsh.
 - A plugin whose directory is deleted while the loader runs moves to `disposed` and is no longer listed. A plugin whose directory is created while the loader runs goes through the same startup path as a plugin present at startup, including the `enabled: false` and `autoEnable: false` rules.
 
@@ -346,6 +375,9 @@ interface BackendInstance {
   /** Deliver one host event. */
   dispatchEvent(event: string, args: unknown[]): Promise<unknown>
 
+  /** Run one command node declared by this plugin. */
+  callCommand(command: string, input: string): Promise<unknown>
+
   /** Stop the instance, killing it if it does not stop in time. */
   stop(reason?: string): Promise<void>
 }
@@ -362,6 +394,7 @@ Both backends satisfy the same contract. Their physical differences are:
 | Boundary | Operating system process | Worker thread in the host process |
 | Transport | NDJSON over `stdin` and `stdout` | `postMessage` and shared linear memory |
 | Registration channel | Plugin sends requests during `apply` through `setInboundHandler` | Plugin returns declarations as the `apply` result |
+| Command dispatch | The plugin sends `commands.register` during apply, and the host calls `command.call` with the node id | The plugin declares `commands` in the apply result, and the host calls `command.call` with the node id |
 | Timeout enforcement | Request deadline; kill the process on a boot timeout | Terminate the worker |
 | Synchronous host callback | Possible in principle, not used by the SDK | Not possible; the worker cannot call back across threads |
 
@@ -378,6 +411,8 @@ A backend must never let plugin code occupy the host main thread, must reap the 
 | Infinite loop | A loop during startup is killed at the startup timeout; a loop during a call fails that call and the process stays alive | An initialization loop is terminated at the startup timeout; a loop during a call terminates the worker and marks the plugin `failed` ([WasmABI §5](wasm/WasmABI.md#5-worker-isolation-and-deadlines)) |
 | Memory limit | None imposed by the loader | The worker's JavaScript heap is capped at 256 MB by `maxOldGenerationSizeMb`; WebAssembly linear memory is not capped |
 | Environment | Sanitized; manifest `env` is applied afterwards | Not applicable |
+
+Commands are a human-facing entry, not a new authority. A command handler runs with the same access as a tool handler and cannot reach host services outside §3. The namespace rule in §3.6 prevents an external plugin from replacing a command that dsh or another plugin already registered.
 
 The Python sandbox is process isolation, not permission isolation. A Python plugin can read and write files and open network connections, so only trusted plugins should run. The WebAssembly isolation prevents a hang from blocking the host and prevents active IO, but it is not a security boundary against memory corruption in the module. Only trusted plugins should run.
 
@@ -439,7 +474,7 @@ dsh-mloader exposes three operator surfaces for the person running dsh:
 
 - the External plugins section on the dsh Plugins page, which lists the hosted plugins and switches them on and off at runtime;
 - HTTP routes under `/mloader` that serve the plugin list, runtime switch and loader configuration to the browser half;
-- the `/mloader` slash command group.
+- the `/mloader` slash command group, whose detail block lists the commands a hosted plugin registered.
 
 They are internal to dsh-mloader and are not part of the external plugin ABI. An external plugin cannot call them, cannot register on them, and must not depend on their request or response shapes. The browser section and the HTTP routes exist only in a web profile; a non-web dsh profile mounts the loader and hosts plugins without them, and the slash command exists only when the optional commands service is available.
 
@@ -451,7 +486,7 @@ They are internal to dsh-mloader and are not part of the external plugin ABI. An
 4. It does not persist plugin state. Plugins are discovered and mounted again on each start.
 5. It does not support a plugin UI or a client half.
 6. It does not allow a WebAssembly plugin to call back into the host synchronously.
-7. It does not expose slash commands or any capability outside the §3 whitelist to external plugins.
+7. It does not expose any capability outside the §3 whitelist to external plugins. Command registration is the only human-facing surface, and §3.6 bounds it.
 8. It does not enable the WebAssembly backend by default. It ships a source-only WebAssembly example under `seeds/wasm-mloader/` that the loader never installs.
 9. It does not restart a crashed plugin automatically.
 10. It does not watch the files inside an installed plugin. A changed manifest or entry file takes effect only after a reload or a restart.

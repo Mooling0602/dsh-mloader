@@ -80,6 +80,7 @@ function isLoaded(state: PluginState): boolean {
 function renderDetail(plugin: PluginSnapshot): string {
   const tools = plugin.tools.length > 0 ? plugin.tools.join(', ') : 'none'
   const events = plugin.events.length > 0 ? plugin.events.join(', ') : 'none'
+  const commands = plugin.commands?.length ? plugin.commands.join(', ') : 'none'
   const lines = [
     `Plugin ${plugin.id}:`,
     `  Name: ${plugin.name}`,
@@ -88,6 +89,7 @@ function renderDetail(plugin: PluginSnapshot): string {
     `  State: ${plugin.state} (${isLoaded(plugin.state) ? 'loaded' : 'not loaded'})`,
     `  Tools: ${tools}`,
     `  Events: ${events}`,
+    `  Commands: ${commands}`,
     `  Registrations: ${plugin.registrations}`,
   ]
   if (plugin.error) lines.push(`  Error: ${plugin.error}`)

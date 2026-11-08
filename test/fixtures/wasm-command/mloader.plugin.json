@@ -1,0 +1,12 @@
+{
+  "id": "wasm-command",
+  "name": "WASM Command",
+  "version": "1.0.0",
+  "backend": "wasm",
+  "entry": "command.wasm",
+  "enabled": true,
+  "timeouts": {
+    "startupMs": 5000,
+    "callMs": 500
+  }
+}

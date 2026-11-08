@@ -44,6 +44,7 @@ interface PendingInvocation {
 interface WasmApplyResult {
   tools?: unknown[]
   events?: unknown[]
+  commands?: unknown[]
 }
 
 /** The JSON object a WebAssembly plugin returns as a call result. */
@@ -118,7 +119,7 @@ export class WasmBackendInstance implements BackendInstance {
     this.spec = spec
     this.logger = logger
     this.onCrash = onCrash
-    this.capabilities = { tools: true, events: true, logger: true, effect: true }
+    this.capabilities = { tools: true, events: true, logger: true, effect: true, commands: true }
   }
 
   /**
@@ -368,6 +369,11 @@ export class WasmBackendInstance implements BackendInstance {
       await registrar.handle('events.on', { event })
     }
 
+    const commands = Array.isArray(result?.commands) ? result.commands : []
+    for (const command of commands) {
+      await registrar.handle('commands.register', { command })
+    }
+
     // The worker can die while the host performs these registrations, and no
     // pending call exists to fail in that window. Reporting the plugin as
     // applied would leave a dead backend behind a registered tool, so the
@@ -393,6 +399,23 @@ export class WasmBackendInstance implements BackendInstance {
    */
   async callTool(name: string, args: unknown, _signal?: unknown): Promise<unknown> {
     return await this.#invoke('tool.call', { tool: name, args }, this.spec.timeouts.callMs)
+  }
+
+  /**
+   * Run one command node declared by this plugin.
+   *
+   * The command node id routes the call; the text after the command name is
+   * passed verbatim. The deadline is the manifest call timeout. A timeout on
+   * this path follows the same rule as a tool call: the worker is terminated
+   * and the plugin becomes failed.
+   *
+   * @param command - Command node id the plugin declared.
+   * @param input - Text after the command name.
+   * @returns The command result the plugin returned.
+   * @throws {Error} When the command fails or the deadline expires.
+   */
+  async callCommand(command: string, input: string): Promise<unknown> {
+    return await this.#invoke('command.call', { command, input }, this.spec.timeouts.callMs)
   }
 
   /**

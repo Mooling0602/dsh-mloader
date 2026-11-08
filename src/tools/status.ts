@@ -123,7 +123,8 @@ export function format(value: unknown): string {
     lines.push(
       `- ${plugin.id} (${plugin.backend}, ${plugin.state})` +
       `${plugin.tools?.length ? ` tools=[${plugin.tools.join(', ')}]` : ''}` +
-      `${plugin.events?.length ? ` events=[${plugin.events.join(', ')}]` : ''}`,
+      `${plugin.events?.length ? ` events=[${plugin.events.join(', ')}]` : ''}` +
+      `${plugin.commands?.length ? ` commands=[${plugin.commands.join(', ')}]` : ''}`,
     )
     if (plugin.error) lines.push(`  error: ${plugin.error}`)
   }

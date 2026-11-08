@@ -99,7 +99,7 @@ export class PythonBackendInstance {
         this.venvDir = venvDir;
         this.onCrash = onCrash;
         this.enablePyc = enablePyc;
-        this.capabilities = { tools: true, events: true, logger: true, effect: true };
+        this.capabilities = { tools: true, events: true, logger: true, effect: true, commands: true };
     }
     /**
      * Start the child process and complete the boot handshake.
@@ -432,6 +432,31 @@ export class PythonBackendInstance {
         const reply = await this.#request('tool.call', { tool: name, args }, this.spec.timeouts.callMs);
         if (reply.ok !== true) {
             const message = reply.error?.message ?? 'plugin tool failed';
+            const error = new Error(message);
+            error.kind = reply.error?.kind;
+            throw error;
+        }
+        return reply.result;
+    }
+    /**
+     * Run one command node declared by this plugin.
+     *
+     * The command node id routes the call; the text after the command name is
+     * passed verbatim. The deadline is the manifest call timeout, and a failed
+     * command leaves the process alive, because it is an ordinary request.
+     *
+     * @param command - Command node id the plugin declared.
+     * @param input - Text after the command name.
+     * @returns The command result the plugin returned.
+     * @throws {Error} When the command fails, times out or cannot be delivered.
+     */
+    async callCommand(command, input) {
+        if (this.stopped || this.child === null) {
+            throw new Error(`plugin ${this.spec.id} is not running`);
+        }
+        const reply = await this.#request('command.call', { command, input }, this.spec.timeouts.callMs);
+        if (reply.ok !== true) {
+            const message = reply.error?.message ?? 'plugin command failed';
             const error = new Error(message);
             error.kind = reply.error?.kind;
             throw error;

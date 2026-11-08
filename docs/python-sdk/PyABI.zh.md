@@ -33,6 +33,7 @@
 | --- | --- | --- |
 | `plugin` | 装饰器 | 标记入口函数 `apply(ctx)`。 |
 | `tool` | 装饰器 | 在没有 `apply` 函数时声明工具。 |
+| `command` | 装饰器 | 在没有 `apply` 函数时声明斜杠命令节点。 |
 | `ctx` | 代理 | 能力上下文。属性查找转发给活动上下文，在启动前抛 `HostUnavailable`。 |
 | `get_context()` | 函数 | 返回活动的 `Context`，启动前返回 `None`。 |
 | `Context` | 类 | 上下文对象的类型，用于注解。 |
@@ -65,6 +66,7 @@ Windows 下解释器是 `<profile>/mloader/.venv/Scripts/python.exe`。环境在
 - 模块级 `apply` 函数在没有 `@plugin` 装饰时也会被采用。被装饰的入口函数优先于普通 `apply`。
 - `@plugin(name="...")` 只是为了可读性而接受，没有效果：清单是身份权威。
 - 模块级 `TOOLS` 列表也会被采用。每一项需要 `name`、`description` 和 `handler`；`parameters`、`output` 和 `timeoutMs` 可选。
+- 模块级 `COMMANDS` 列表也会被采用。每一项需要 `names`、`description` 和 `handler`；`input_hint` 和 `node_id` 可选。
 
 包布局的影响见 [Package](Package.zh.md) 第 1 节。
 
@@ -96,6 +98,14 @@ def apply(ctx: Context):
     def greet(args):
         return {"text": f"hello {args['who']}"}
 
+    @ctx.commands.register(
+        names=["my-command", "my-plugin-command"],
+        description="Run the plugin from the command line.",
+        input_hint="text",
+    )
+    def run(input):
+        return f"plugin saw {input.strip()}"
+
     @ctx.on("tools/execute")
     def observe(payload):
         ctx.logger.debug(f"tool executed: {payload}")
@@ -108,7 +118,7 @@ def apply(ctx: Context):
 插件把工具声明为被装饰的函数，不需要入口函数。
 
 ```python
-from dsh_mloader_sdk import tool
+from dsh_mloader_sdk import command, tool
 
 @tool(
     name="add",
@@ -122,26 +132,39 @@ from dsh_mloader_sdk import tool
 )
 def add(args):
     return {"sum": args["a"] + args["b"]}
+
+@command(
+    names=["my-plugin-run", "my-plugin-command"],
+    description="Run the plugin from the command line.",
+    input_hint="text",
+)
+def run(input):
+    return f"plugin saw {input.strip()}"
 ```
 
 `@tool` 把名称作为第一个位置参数、描述作为第二个，所以只给描述会在导入时失败。示例里的关键字形式等价。
 
+`@command` 把候选名作为第一个位置参数、描述作为第二个。未给 `node_id` 时，第一个候选名就是节点 id。
+
 ### 3.3 混用与顺序
 
-两种风格可以在一个插件里混用。声明的工具先注册，然后入口函数运行。注册请求是同步的：宿主确认后才返回，被拒绝时在调用点抛 `PluginCallError`。apply 握手失败会停止进程。
+两种风格可以在一个插件里混用。声明的工具先注册，然后声明的命令，最后入口函数运行。被退避规则跳过的命令节点不会让握手失败。注册请求是同步的：宿主确认后才返回，被拒绝时在调用点抛 `PluginCallError`。apply 握手失败会停止进程。
 
 ### 3.4 上下文接口
 
-`apply(ctx)` 收到一个 `Context`，包含四个命名空间；包根的 `ctx` 代理同一个对象。
+`apply(ctx)` 收到一个 `Context`，包含五个命名空间；包根的 `ctx` 代理同一个对象。
 
 | 命名空间 | 调用 | 约定 |
 | --- | --- | --- |
 | `ctx.tools` | `register(name, description, parameters=None, output=None, timeout_ms=None)` | 返回一个装饰器，把处理器记录在 `name` 下。工具载荷见 [ABI-unified](../ABI-unified.zh.md) 第 3.2 节。 |
+| `ctx.commands` | `register(names, description, input_hint=None, node_id=None)` | 返回一个装饰器，声明一个命令节点。`names` 是字符串或按优先级排列的候选名列表。载荷和退避规则见同一文档第 3.6 节。 |
 | `ctx.on` | `on(event)` 或 `ctx.on(event)` | 返回一个装饰器，把处理器订阅到一个白名单事件。白名单、参数个数规则和 fire-and-forget 规则在同一文档第 3.3 节。 |
 | `ctx.logger` | `debug`、`info`、`warn`、`error`，参数为 `(message, data=None)` | 发送单向通知。从不等待回复，也从不抛异常。它是插件通往加载器日志器的唯一路径，并且清理运行期间仍然可用。 |
 | `ctx.effect` | `register(label, cleanup=None)` | 记录一个在插件销毁时运行的清理函数。清理按注册的逆序运行，一个清理失败不会阻止其余清理。 |
 
 工具处理器接收一个参数，即模型提供的对象。它必须返回可 JSON 序列化的值；声明的 `output` schema 或推导出的 schema 会校验它。事件处理器遵循 [ABI-unified](../ABI-unified.zh.md) 第 3.3 节的参数个数规则：零个参数时不传参数调用，一个参数时传第一个投影参数，多于一个时传所有投影参数。
+
+命令处理器接收一个参数，即注册命令名之后的原始文本。它可以返回字符串，变成成功文本结果；也可以返回带 `kind`（`success` 或 `error`）和 `text` 的字典。抛出的异常会变成该次调用的错误结果，不会停止进程。
 
 ## 4. 结果 schema 推断
 
@@ -174,6 +197,8 @@ def add(args):
 | --- | --- |
 | 工具处理器抛异常 | `tool.call` 回复是 `ok:false`，带异常消息。插件进程继续存活。 |
 | 调用未知工具 | 回复是 `ok:false`，错误消息会指出该工具。 |
+| 命令处理器抛异常 | `command.call` 回复是 `ok:false`，带异常消息，宿主把它渲染为错误结果。插件进程继续存活。 |
+| 调用未知命令节点 | 回复是 `ok:false`，错误消息会指出该节点。 |
 | 注册被拒绝 | `apply` 里的调用点抛 `PluginCallError`。apply 握手随后失败。 |
 | 插件模块导入失败 | 启动回复是 `ok:false`，带 `import failed: ...`，进程以状态 1 退出。 |
 | 清理函数抛异常 | traceback 写到运行时诊断流，其余清理仍然运行。 |
@@ -215,13 +240,17 @@ sequenceDiagram
     Note right of P: load the entry module
     P->>H: ready (pluginId, python)
     H->>P: apply (inject)
-    Note right of P: register declared tools,\nthen run apply(ctx)
+    Note right of P: register declared tools and commands,\nthen run apply(ctx)
     P->>H: tools.register (request)
     H->>P: ack (ok:true)
     P->>H: events.on (request)
     H->>P: ack (ok:true)
+    P->>H: commands.register (request)
+    H->>P: ack (ok:true)
     P->>H: apply result (tools, events)
     H->>P: tool.call (tool, args)
+    P->>H: result
+    H->>P: command.call (command, input)
     P->>H: result
     H->>P: event (event, args)
     P->>H: result
@@ -238,14 +267,14 @@ sequenceDiagram
 | 情况 | 行为 |
 | --- | --- |
 | `boot` 或 `apply` 超过 `startupMs`（默认 10000 ms） | 加载器杀死进程并把插件标记为 `failed`。其他插件不受影响。 |
-| `tool.call` 或事件投递超过 `callMs`（默认 30000 ms） | 调用返回错误，进程继续存活。工具超时不会杀死插件。 |
+| `tool.call`、`command.call` 或事件投递超过 `callMs`（默认 30000 ms） | 调用返回错误，进程继续存活。工具或命令超时不会杀死插件。 |
 | 进程崩溃，包括 `os._exit()` | 插件的注册被撤销，状态变为 `failed`。dsh 和其他插件继续运行。 |
 | 插件请求非法 | 以 `ok:false` 拒绝，插件可以看到拒绝。 |
 | 帧无法送达 | 请求立即以 `transport` 错误失败，而不是等超时。 |
 | `stdout` 上出现非协议行 | 跳过该行并记录警告。这是对绕过运行时的输出的防御，不是插件输出通道。 |
 | `dispose` 在 1000 ms 内没有回复 | 加载器发送 SIGTERM，最多等 2000 ms，然后发送 SIGKILL。 |
 
-两个截止时间来自清单：`timeouts.startupMs` 覆盖 `boot` 和 `apply`，`timeouts.callMs` 覆盖 `tool.call` 和事件投递。
+两个截止时间来自清单：`timeouts.startupMs` 覆盖 `boot` 和 `apply`，`timeouts.callMs` 覆盖 `tool.call`、`command.call` 和事件投递。
 
 ## 8. 重新加载与字节码
 

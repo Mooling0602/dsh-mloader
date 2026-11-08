@@ -28,6 +28,7 @@ function isLoaded(state) {
 function renderDetail(plugin) {
     const tools = plugin.tools.length > 0 ? plugin.tools.join(', ') : 'none';
     const events = plugin.events.length > 0 ? plugin.events.join(', ') : 'none';
+    const commands = plugin.commands?.length ? plugin.commands.join(', ') : 'none';
     const lines = [
         `Plugin ${plugin.id}:`,
         `  Name: ${plugin.name}`,
@@ -36,6 +37,7 @@ function renderDetail(plugin) {
         `  State: ${plugin.state} (${isLoaded(plugin.state) ? 'loaded' : 'not loaded'})`,
         `  Tools: ${tools}`,
         `  Events: ${events}`,
+        `  Commands: ${commands}`,
         `  Registrations: ${plugin.registrations}`,
     ];
     if (plugin.error)

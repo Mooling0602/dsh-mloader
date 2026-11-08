@@ -44,12 +44,13 @@ The manifest `entry` field names the `.wasm` file, resolved against the manifest
 - The host calls `mloader_free(ptr, len)` for the request buffer after `mloader_call` returns. The result buffer is owned by the plugin and must remain valid until the next request.
 - Invalid JSON in the reply fails the call and does not crash the host.
 
-The operations and payload shapes are the shared ones in [ABI-unified](../ABI-unified.md) section 4.2. The WebAssembly backend uses three of them:
+The operations and payload shapes are the shared ones in [ABI-unified](../ABI-unified.md) section 4.2. The WebAssembly backend uses four of them:
 
 | Operation | Payload | Reply `result` |
 | --- | --- | --- |
 | `apply` | `inject` | The declaration object of section 3. |
 | `tool.call` | `tool`, `args` | The JSON value returned by the handler. |
+| `command.call` | `command` (node id), `input` | The command result object with `kind` and `text`. |
 | `event` | `event`, projected `args` array | The handler return value. |
 
 There is no `boot` request. Initialization is the worker handshake in section 5. There is no `dispose` request. Stopping the plugin terminates the worker.
@@ -59,13 +60,13 @@ There is no `boot` request. Initialization is the worker handshake in section 5.
 The `apply` reply declares the plugin's capabilities in its `result` object:
 
 ```json
-{"ok": true, "result": {"tools": [], "events": []}}
+{"ok": true, "result": {"tools": [], "events": [], "commands": []}}
 ```
 
-- Each entry in `tools` is a tool object as specified in [ABI-unified](../ABI-unified.md) section 3.2. Each name in `events` must be in the whitelist of section 3.3.
+- Each entry in `tools` is a tool object as specified in [ABI-unified](../ABI-unified.md) section 3.2. Each name in `events` must be in the whitelist of section 3.3. Each entry in `commands` is a command node as specified in section 3.6.
 - The loader performs the real registrations on its own context and records them in the plugin's ledger.
-- A declaration the loader rejects fails the apply handshake, and the plugin is marked `failed`.
-- The backend has no inbound request channel. A module cannot send `tools.register`, `events.on`, `logger.log` or `effect.register`, and the core ABI provides no way for it to initiate a message.
+- A declaration the loader rejects fails the apply handshake, and the plugin is marked `failed`. A command node that the retreat rule skips does not fail the handshake; the other declarations stay registered.
+- The backend has no inbound request channel. A module cannot send `tools.register`, `commands.register`, `events.on`, `logger.log` or `effect.register`, and the core ABI provides no way for it to initiate a message.
 - There is no log channel and no cleanup channel. The manifest `capabilities` object is declared metadata and does not add one.
 
 ## 4. WASI modules
@@ -86,7 +87,7 @@ WASI is not part of the supported contract.
 - The host starts the worker, and the worker compiles and instantiates the module, then checks the required exports. A reactor is initialized through `_initialize` next, through the WASI provider when the module imports WASI and directly otherwise, and the version check runs after initialization, because a reactor runtime traps when one of its exports runs first. A command module has its version checked before `_start`, so a module written for another ABI shape never runs initialization code. The worker then posts `ready`. A failure posts `init-error` and the plugin is marked `failed`. Startup succeeds only on `ready`.
 - Module initialization is bounded by the manifest `timeouts.startupMs`, counted from worker start through the `ready` handshake, so compilation, instantiation, reactor initialization and the version check share that budget. A module whose `_start` or `_initialize` exceeds it has its worker terminated and is marked `failed`, so a looping initializer cannot leave the plugin stuck in `loaded`.
 - The worker runs with `resourceLimits.maxOldGenerationSizeMb` set to 256 MB. This caps the worker's JavaScript heap only; WebAssembly linear memory is external memory and is not capped by the loader, so only trusted modules should run.
-- The apply handshake uses the manifest `timeouts.startupMs`, and each `tool.call` or `event` delivery uses `timeouts.callMs`. On expiry the host fails every pending call, terminates the worker and reports one failure with reason `timeout`, because terminating the worker is the only mechanism that stops a looping instance. A timed out call therefore ends the plugin's instance: its registrations are revoked and its record becomes `failed`, unlike the Python backend, where the process stays alive.
+- The apply handshake uses the manifest `timeouts.startupMs`, and each `tool.call`, `command.call` or `event` delivery uses `timeouts.callMs`. On expiry the host fails every pending call, terminates the worker and reports one failure with reason `timeout`, because terminating the worker is the only mechanism that stops a looping instance. A timed out call therefore ends the plugin's instance: its registrations are revoked and its record becomes `failed`, unlike the Python backend, where the process stays alive.
 - The host clears the worker handle before terminating it, so a late reply or exit cannot settle a call that already failed or report the failure twice.
 - A worker exit, a worker error event or a call deadline after `apply` fails every pending call and reports exactly one failure through the backend's crash callback, with reason `exit`, `error` or `timeout`. A failure that arrives before `apply` completes reaches the loader through the rejected startup promise instead, and a stop requested by the loader is not a failure. The loader revokes the plugin's registrations, clears the instance and marks the record `failed`; `reload` or `enable` starts a fresh worker, and nothing restarts the plugin automatically.
 - The backend checks that the worker is still alive after it performs the declared registrations. A worker that exits during the apply handshake fails the apply, so a plugin is never recorded as `applied` behind a dead worker.

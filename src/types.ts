@@ -28,6 +28,7 @@ export interface PluginCapabilities {
   events: boolean
   logger: boolean
   effect: boolean
+  commands: boolean
 }
 
 /** A plugin manifest after discovery has normalised it. */
@@ -91,7 +92,34 @@ export interface CommandDefinition {
   name: string
   description: string
   input?: { hint?: string }
-  handler(invocation: { rawInput?: string }): { kind: 'success' | 'error'; text: string }
+  handler(
+    invocation: { rawInput?: string },
+  ): CommandResult | Promise<CommandResult>
+}
+
+/** Result one command handler returns to the dispatching UI. */
+export interface CommandResult {
+  kind: 'success' | 'error'
+  text: string
+}
+
+/** Input hint a command declaration advertises to capable clients. */
+export interface CommandInputHint {
+  hint: string
+}
+
+/**
+ * One command node a plugin declares.
+ *
+ * The node id routes execution back to the plugin and does not change with the
+ * candidate names. The names are tried in order against the global command
+ * namespace, and the first one that is not taken is registered.
+ */
+export interface CommandDeclaration {
+  id: string
+  names: string[]
+  description: string
+  input?: CommandInputHint
 }
 
 /** Structural view of the Cordis context the loader uses. */
@@ -134,6 +162,7 @@ export interface PluginSnapshot {
   state: PluginState
   tools: string[]
   events: string[]
+  commands: string[]
   registrations: number
   error?: string
 }
@@ -157,5 +186,7 @@ export interface BackendInstance {
   apply(registrar: RegistrarHandle): Promise<ApplyResult | undefined>
   callTool(name: string, args: unknown, signal?: unknown): Promise<unknown>
   dispatchEvent(event: string, args: unknown[]): Promise<unknown>
+  /** Run one command node and return its command result. */
+  callCommand(command: string, input: string): Promise<unknown>
   stop(reason?: string): Promise<void>
 }

@@ -34,7 +34,7 @@
 
 1. **加载器是普通的 Cordis 插件。** 它不修改 dsh 加载器、bundle 机制或 `import()`，也不替换任何已有插件。
 2. **外部插件不是 Cordis 插件。** 它不创建 Cordis 插件实体、fiber 节点或每插件 `ctx` 作用域，也永远不会出现在 dsh 插件列表里。它通过本文的协议发送注册意图，加载器在自己的 `ctx` 上执行真正的注册。
-3. **能力面是白名单，不是透传。** 只有第 3 节的四个操作可达。其他所有 `ctx` 设施按设计都不可用。
+3. **能力面是白名单，不是透传。** 只有第 3 节的五个操作可达。其他所有 `ctx` 设施按设计都不可用。
 4. **注册可撤销。** 插件引起的每个注册都属于该插件的账本，并在插件卸载时撤销。
 5. **外部代码永远不占用宿主主线程。** Python 运行在子进程里，WebAssembly 运行在 worker 线程里，宿主继续自己的执行链，不等待插件。
 
@@ -81,7 +81,7 @@ dsh main process (Node, Cordis)
   "entry": "plugin.py",
   "enabled": true,
   "inject": [],
-  "capabilities": { "tools": true, "events": true, "logger": true, "effect": true },
+  "capabilities": { "tools": true, "events": true, "logger": true, "effect": true, "commands": true },
   "timeouts": { "startupMs": 10000, "callMs": 30000 },
   "env": {}
 }
@@ -97,7 +97,7 @@ dsh main process (Node, Cordis)
 | `targets` | 条件必需 | 数组 | 无 | WebAssembly 包目标，见 [wasm/Package](wasm/Package.zh.md) 第 1 节。只对 `"backend": "wasm"` 有效。可安装的 WebAssembly 包需要它，以目录安装的插件没有它。带 `targets` 的清单没有顶层 `entry`。 |
 | `enabled` | 否 | 布尔 | `true` | 为 `false` 时插件会被发现并报告，但不启动。 |
 | `inject` | 否 | 字符串数组 | `[]` | 在启动载荷中转发给插件的元数据。不授予能力，也不解析宿主服务。 |
-| `capabilities` | 否 | 对象 | 全 `true` | 开关 `tools`、`events`、`logger` 和 `effect`。它们是声明性元数据：v1 不强制执行，所以设为 `false` 只表示意图。强制边界是第 3 节的注册操作白名单和第 3.3 节的事件白名单。 |
+| `capabilities` | 否 | 对象 | 全 `true` | 开关 `tools`、`events`、`logger`、`effect` 和 `commands`。它们是声明性元数据：v1 不强制执行，所以设为 `false` 只表示意图。强制边界是第 3 节的注册操作白名单和第 3.3 节的事件白名单。 |
 | `timeouts.startupMs` | 否 | 数字 | `10000` | 启动握手和 WebAssembly 模块初始化的截止时间，单位毫秒。 |
 | `timeouts.callMs` | 否 | 数字 | `30000` | 一次工具调用或一次事件投递的截止时间，单位毫秒。 |
 | `env` | 否 | 对象 | `{}` | Python 子进程的额外环境变量。值会转成字符串。WebAssembly 后端忽略。 |
@@ -122,11 +122,11 @@ dsh main process (Node, Cordis)
 
 ### 2.3 声明能力
 
-外部插件通过其后端的通道到达能力面。第 3 节的四个操作就是全部能力面，后端实现其通道支持的子集。Python 后端在 apply 期间或之后把每个操作作为请求帧发送（[`PyABI 第 6 节`](python-sdk/PyABI.zh.md#6-进程传输与握手)），所以四个都支持。WebAssembly 后端没有入站通道：它把工具和事件声明作为 apply 结果返回，没有日志或清理操作（[`WasmABI 第 3 节`](wasm/WasmABI.zh.md#3-声明)）。加载器按第 3 节校验每个声明，并记录到插件的账本，无论它由哪条通道送达。
+外部插件通过其后端的通道到达能力面。第 3 节的五个操作就是全部能力面，后端实现其通道支持的子集。Python 后端在 apply 期间或之后把每个操作作为请求帧发送（[`PyABI 第 6 节`](python-sdk/PyABI.zh.md#6-进程传输与握手)），所以五个都支持。WebAssembly 后端没有入站通道：它把工具、事件和命令声明作为 apply 结果返回，没有日志或清理操作（[`WasmABI 第 3 节`](wasm/WasmABI.zh.md#3-声明)）。加载器按第 3 节校验每个声明，并记录到插件的账本，无论它由哪条通道送达。
 
 ## 3. ctx 能力白名单
 
-### 3.1 四个操作
+### 3.1 五个操作
 
 | # | RPC 操作 | 语义 |
 | --- | --- | --- |
@@ -134,12 +134,13 @@ dsh main process (Node, Cordis)
 | 2 | `events.on` | 订阅一个白名单事件。 |
 | 3 | `logger.log` | 单向日志通知。不等待回复。 |
 | 4 | `effect.register` | 注册一个在插件卸载时运行的清理函数。 |
+| 5 | `commands.register` | 在全局斜杠命令命名空间声明一个命令节点。 |
 
-Python SDK 把这些操作暴露为 `ctx.tools.register`、`ctx.on`、`ctx.logger` 和 `ctx.effect.register`（[`PyABI 第 3.4 节`](python-sdk/PyABI.zh.md#34-上下文接口)）。Python 后端支持全部四个。WebAssembly 后端只支持工具和事件声明；第 2.3 节说明它如何投递。
+Python SDK 把这些操作暴露为 `ctx.tools.register`、`ctx.commands.register`、`ctx.on`、`ctx.logger` 和 `ctx.effect.register`（[`PyABI 第 3.4 节`](python-sdk/PyABI.zh.md#34-上下文接口)）。Python 后端支持全部五个。WebAssembly 后端支持工具、事件和命令声明；第 2.3 节说明它如何投递。
 
-其他都不可达。`ctx.session`、`ctx.llm`、`ctx.subprocess`、`ctx.commands` 和任意 `ctx.*` 透传都不属于契约，插件无法取得它们。
+其他都不可达。`ctx.session`、`ctx.llm`、`ctx.subprocess` 和任意 `ctx.*` 透传都不属于契约，插件无法取得它们。
 
-斜杠命令故意不提供给外部插件。命令是全局命名空间里面向人的条目，让任何外部插件注册都会污染用户的命令列表。加载器自己的 `/mloader` 命令是加载器作为普通 Cordis 插件做出的注册，不是提供给插件的能力。
+命令名与 dsh 和其他插件已经注册的命令共用一个全局命名空间。命令节点按优先级声明候选名，加载器注册第一个尚未被占用的名字。所有候选都被占用时，加载器保留已经存在的命令并跳过该节点；插件继续加载。第 3.6 节规定声明、备选和退避规则。希望名字可预测的插件应声明一个不常见的名字，例如带有自己 id 的名字。加载器自己的 `/mloader` 命令是加载器作为普通 Cordis 插件做出的注册，不是提供给插件的能力。
 
 ### 3.2 工具注册
 
@@ -218,6 +219,30 @@ Python SDK 把这些操作暴露为 `ctx.tools.register`、`ctx.on`、`ctx.logge
 
 其他内容都会被拒绝，包括 `format`、`minimum`、`maximum`、`pattern`、`$ref`、`anyOf`、`allOf`、`not`、`patternProperties` 和 `definitions`。加载器在注册前校验，并报告插件 id、工具名和 schema 路径，所以违规是可归因的。
 
+### 3.6 命令注册
+
+命令节点在全局斜杠命令命名空间声明一个面向人的条目：
+
+| 字段 | 必需 | 含义 |
+| --- | --- | --- |
+| `id` | 否 | 用于路由执行的稳定节点 id。默认取第一个候选名。 |
+| `names` | 是 | 按优先级排列的非空候选命令名数组。每个名字匹配 `^[a-z][a-z0-9_-]{0,63}$`。 |
+| `description` | 是 | 显示在命令列表里的非空摘要。 |
+| `input` | 否 | 带非空 `hint` 字符串的对象，作为输入占位提示。 |
+
+加载器通过可选的 dsh commands 服务注册该节点：
+
+- 该服务在 dsh 里是可选的。服务缺失时，每个命令节点都会被跳过并记录警告，插件保持 `applied`。
+- 候选名按顺序尝试。全局命名空间里第一个尚未注册的名字生效，其余候选保持未使用。
+- 所有候选都已被注册时，加载器保留已存在的命令并跳过该节点，同时记录警告。插件保持 `applied`。这就是退避规则：外部插件永远不替换已经存在的命令。
+- 声明格式非法、节点 id 重复，或注册失败且原因不是名字冲突时，apply 握手失败。
+- 节点 id 用于路由执行。后端收到带该 id 的 `command.call`，所以候选名变化不会改变处理器绑定。
+- 注册属于插件账本，在插件卸载、禁用或失败时撤销。失败的插件因此会和工具、事件一起失去命令。
+
+命令处理器收到已注册命令名之后的文本，包括分隔空白。它返回字符串时，结果变为 `{"kind": "success", "text": "..."}`；返回对象时，对象带 `kind`（`success` 或 `error`）和 `text`。错误结果由分发界面渲染。处理器抛出的异常或命令截止时间会转成该次调用的错误结果。
+
+命令执行不经过模型，也不增加权限：处理器以插件已有的访问权限运行。后端收到 `command.call`，载荷为 `{"command": <节点 id>, "input": <原始文本>}`，并返回结果对象。
+
 ## 4. RPC 协议
 
 下面的操作名和载荷形状由所有后端共享。帧封套是 Python 后端对它们的封装（[`PyABI 第 6 节`](python-sdk/PyABI.zh.md#6-进程传输与握手)）；WebAssembly 后端在自己的请求和结果缓冲区里携带同样的操作，没有这个封套（[`WasmABI 第 2 节`](wasm/WasmABI.zh.md#2-请求与结果约定)）。
@@ -268,6 +293,7 @@ Python SDK 把这些操作暴露为 `ctx.tools.register`、`ctx.on`、`ctx.logge
 | `apply` | `inject` | `tools`：排序后的已注册工具名；`events`：排序后的已订阅事件名。 |
 | `tool.call` | `tool`、`args` | 处理器返回的 JSON 值。 |
 | `event` | `event`、投影后的 `args` 数组 | 处理器返回值。 |
+| `command.call` | `command`（节点 id）、`input` | 带 `kind` 和 `text` 的命令结果对象。 |
 | `dispose` | `reason` | 清理运行后为 `disposed: true`；进程随后退出。 |
 
 插件载荷：
@@ -278,10 +304,11 @@ Python SDK 把这些操作暴露为 `ctx.tools.register`、`ctx.on`、`ctx.logge
 | `events.on` | 白名单里的 `event` 名。 |
 | `logger.log` | `level`（`debug`、`info`、`warn` 或 `error`）、`message`、可选的 `data`。 |
 | `effect.register` | `label`。 |
+| `commands.register` | 第 3.6 节定义的 `command` 对象。 |
 
 这些列表之外的操作会以 `ok:false` 拒绝，并带一条列出白名单的错误消息。
 
-WebAssembly 后端没有入站请求通道，所以不发送任何插件载荷操作。它改为在 apply 结果里返回 `tools` 和 `events`。它只被 `apply`、`tool.call` 和 `event` 驱动：初始化是 worker 的 `ready` 握手，停止路径终止 worker，没有 `dispose` 帧（[`WasmABI 第 3 节`](wasm/WasmABI.zh.md#3-声明)、[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)）。
+WebAssembly 后端没有入站请求通道，所以不发送任何插件载荷操作。它改为在 apply 结果里返回 `tools`、`events` 和 `commands`。它只被 `apply`、`tool.call`、`command.call` 和 `event` 驱动：初始化是 worker 的 `ready` 握手，停止路径终止 worker，没有 `dispose` 帧（[`WasmABI 第 3 节`](wasm/WasmABI.zh.md#3-声明)、[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)）。
 
 ### 4.3 截止时间与失败
 
@@ -289,11 +316,12 @@ WebAssembly 后端没有入站请求通道，所以不发送任何插件载荷�
 | --- | --- |
 | WebAssembly 模块初始化、`boot` 或 `apply` 超过 `startupMs`（默认 10000 ms） | 加载器停止后端，把插件标记为 `failed`，其他插件不受影响。 |
 | `tool.call` 或事件投递超过 `callMs`（默认 30000 ms） | 调用返回错误。实例随后怎样处理取决于后端：Python 进程继续存活（[`PyABI 第 7 节`](python-sdk/PyABI.zh.md#7-截止时间与失败)），WebAssembly worker 被终止并上报失败，所以插件变为 `failed`，注册被撤销（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)）。 |
+| `command.call` 超过 `callMs`（默认 30000 ms） | 该次命令调用返回错误结果。Python 进程继续存活；WebAssembly worker 被终止，插件变为 `failed`（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)）。 |
 | 后端崩溃 | 插件的注册被撤销，状态变为 `failed`。dsh 和其他插件继续运行。 |
 | 插件请求非法 | 以 `ok:false` 拒绝，插件可以看到拒绝。 |
 | 请求无法送达 | 立即以 `transport` 错误失败，而不是等待截止时间。 |
 
-两个截止时间来自清单：`timeouts.startupMs` 覆盖 WebAssembly 模块初始化以及 `boot` 和 `apply`，`timeouts.callMs` 覆盖 `tool.call` 和事件投递。后端用其隔离边界提供的机制执行截止时间；后端文档规定该机制。
+两个截止时间来自清单：`timeouts.startupMs` 覆盖 WebAssembly 模块初始化以及 `boot` 和 `apply`，`timeouts.callMs` 覆盖 `tool.call`、`command.call` 和事件投递。后端用其隔离边界提供的机制执行截止时间；后端文档规定该机制。
 
 ## 5. 生命周期与归属
 
@@ -317,6 +345,7 @@ discovered -> loaded -> applied -> disposed
 - 账本关闭后尝试的注册会立即被销毁，而不是悬空。
 - 对不是 `applied` 的插件调用工具会失败，错误会指出当前状态。
 - `reload` 撤销账本，停止后端实例并启动新实例。新实例重新加载插件，所以模块级状态不会跨重新加载保留。
+- 命令注册属于同一个账本。禁用、卸载或失败插件时，命令会和工具、事件一起撤销；重新加载会重新注册它们。
 - 崩溃的插件变成 `failed`，不会自动重启。对 WebAssembly 后端，worker 退出、报错或超过调用截止时间都遵循同一规则：注册被撤销，实例被丢弃，记录变为 `failed`。操作者可以通过加载器可选的 `mloader` 服务重新加载它，或重启 dsh。
 - 加载器运行期间目录被删除的插件变成 `disposed`，不再列出。运行期间创建的目录走与启动时相同的启动路径，包括 `enabled: false` 和 `autoEnable: false` 规则。
 
@@ -346,6 +375,9 @@ interface BackendInstance {
   /** Deliver one host event. */
   dispatchEvent(event: string, args: unknown[]): Promise<unknown>
 
+  /** Run one command node declared by this plugin. */
+  callCommand(command: string, input: string): Promise<unknown>
+
   /** Stop the instance, killing it if it does not stop in time. */
   stop(reason?: string): Promise<void>
 }
@@ -362,6 +394,7 @@ interface RegistrarHandle {
 | 边界 | 操作系统进程 | 宿主进程内的 worker 线程 |
 | 传输 | 通过 `stdin` 和 `stdout` 的 NDJSON | `postMessage` 和共享线性内存 |
 | 注册通道 | 插件在 `apply` 期间通过 `setInboundHandler` 发送请求 | 插件把声明作为 `apply` 结果返回 |
+| 命令分发 | 插件在 apply 期间发送 `commands.register`，宿主用节点 id 调用 `command.call` | 插件在 apply 结果里声明 `commands`，宿主用节点 id 调用 `command.call` |
 | 超时执行 | 请求截止时间；启动超时时杀死进程 | 终止 worker |
 | 同步宿主回调 | 原则上可能，SDK 不使用 | 不可能；worker 不能跨线程回调 |
 
@@ -378,6 +411,8 @@ interface RegistrarHandle {
 | 无限循环 | 启动期间的循环会在启动超时被杀；调用期间的循环会让该调用失败，进程继续存活 | 初始化循环会在启动超时被终止；调用期间的循环会终止 worker 并把插件标记为 `failed`（[`WasmABI 第 5 节`](wasm/WasmABI.zh.md#5-worker-隔离与截止时间)） |
 | 内存限制 | 加载器不施加 | worker 的 JavaScript 堆由 `maxOldGenerationSizeMb` 限制为 256 MB；WebAssembly 线性内存不受限制 |
 | 环境 | 已清理；清单 `env` 随后应用 | 不适用 |
+
+命令是面向人的入口，不是新的权限。命令处理器与工具处理器拥有相同的访问权限，也不能取得第 3 节之外的能力。第 3.6 节的命名空间规则阻止外部插件替换 dsh 或其他插件已经注册的命令。
 
 Python 沙箱是进程隔离，不是权限隔离。Python 插件可以读写文件、打开网络连接，所以只应运行可信插件。WebAssembly 隔离阻止挂起阻塞宿主，也阻止主动 IO，但它不是防止模块内存破坏的安全边界。只应运行可信插件。
 
@@ -439,7 +474,7 @@ dsh-mloader 为运行 dsh 的人提供三个操作界面：
 
 - dsh 插件页面上的 External plugins 区块，列出被托管的插件并在运行时开关它们；
 - `/mloader` 下的 HTTP 路由，向浏览器半边提供插件列表、运行时开关和加载器配置；
-- `/mloader` 斜杠命令组。
+- `/mloader` 斜杠命令组，其详情块列出被托管插件注册的命令。
 
 它们属于 dsh-mloader 内部，不是外部插件 ABI 的一部分。外部插件不能调用它们，不能在它们上面注册，也不能依赖它们的请求或响应形状。浏览器区块和 HTTP 路由只在 web profile 存在；非 web 的 dsh profile 会挂载加载器并托管插件，但没有它们；斜杠命令只在可选的 commands 服务可用时存在。
 
@@ -451,7 +486,7 @@ dsh-mloader 为运行 dsh 的人提供三个操作界面：
 4. 不持久化插件状态。插件每次启动都会重新发现并挂载。
 5. 不支持插件 UI 或客户端半边。
 6. 不允许 WebAssembly 插件同步回调宿主。
-7. 不向外部插件暴露斜杠命令或第 3 节白名单之外的任何能力。
+7. 不向外部插件暴露第 3 节白名单之外的任何能力。命令注册是唯一面向人的界面，第 3.6 节界定它。
 8. 默认不启用 WebAssembly 后端。仓库在 `seeds/wasm-mloader/` 提供只含源码的 WebAssembly 示例，加载器永远不会安装它。
 9. 不自动重启崩溃的插件。
 10. 不监听已安装插件内部的文件。清单或入口文件变化只有在重新加载或重启后才生效。

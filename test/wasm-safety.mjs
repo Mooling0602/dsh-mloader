@@ -92,7 +92,7 @@ async function main() {
   )
   await waitFor('fixtures settle with wasm disabled', () => {
     const entries = root.get('mloader')?.list() ?? []
-    return entries.length === 3 && entries.every((entry) => entry.state !== 'loaded' && entry.state !== 'discovered')
+    return entries.length === 4 && entries.every((entry) => entry.state !== 'loaded' && entry.state !== 'discovered')
   })
   const offLoader = root.get('mloader')
   const wasmOff = offLoader.list().find((entry) => entry.id === 'wasm-loop')

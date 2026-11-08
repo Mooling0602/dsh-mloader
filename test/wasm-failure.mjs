@@ -86,7 +86,7 @@ const spec = {
   manifestPath: join(dirname(WASM_BIN), 'mloader.plugin.json'),
   enabled: true,
   inject: [],
-  capabilities: { tools: true, events: true, logger: true, effect: true },
+  capabilities: { tools: true, events: true, logger: true, effect: true, commands: true },
   timeouts: { startupMs: 5000, callMs: 400 },
   env: {},
   declared: {},

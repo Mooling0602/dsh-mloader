@@ -11,9 +11,13 @@
  * @module registrar
  */
 
-import { EVENT_WHITELIST, PLUGIN_STATE, validateToolSchema } from './contract.js'
+import { COMMAND_NAME_PATTERN, EVENT_WHITELIST, PLUGIN_STATE, validateToolSchema } from './contract.js'
 import type {
   BackendInstance,
+  CommandDeclaration,
+  CommandInputHint,
+  CommandResult,
+  CommandService,
   Disposer,
   JsonSchema,
   LoaderContext,
@@ -61,11 +65,15 @@ export class PluginRegistrar {
 
   readonly #ctx: LoaderContext
   readonly #logger: LoaderLogger | undefined
+  readonly #commandsService: CommandService | undefined
   readonly #invokeTool: InvokeTool
   readonly #dispatchEvent: DispatchEvent
   readonly #entries: Disposer[]
   readonly #tools: Map<string, Disposer>
   readonly #subscriptions: Map<string, Disposer>
+  readonly #commands: Map<string, Disposer>
+  readonly #commandNodes: Map<string, string>
+  readonly #commandNodeIds: Set<string>
   #disposed: boolean
 
   /**
@@ -99,9 +107,18 @@ export class PluginRegistrar {
     this.instance = null
     this.error = null
 
+    // The command service is optional in dsh. A plugin that declares commands
+    // still starts when the service is absent; its commands are skipped with a
+    // warning instead of failing the whole plugin.
+    this.#commandsService = typeof ctx.get === 'function'
+      ? ctx.get<CommandService>('commands')
+      : undefined
     this.#entries = []
     this.#tools = new Map()
     this.#subscriptions = new Map()
+    this.#commands = new Map()
+    this.#commandNodes = new Map()
+    this.#commandNodeIds = new Set()
     this.#disposed = false
   }
 
@@ -132,6 +149,9 @@ export class PluginRegistrar {
     for (const dispose of this.#entries.splice(0).reverse()) safeDispose(dispose)
     this.#tools.clear()
     this.#subscriptions.clear()
+    this.#commands.clear()
+    this.#commandNodes.clear()
+    this.#commandNodeIds.clear()
     this.state = PLUGIN_STATE.DISPOSED
   }
 
@@ -145,7 +165,7 @@ export class PluginRegistrar {
    * still accepted because logging creates no registration and a cleanup has to
    * be able to log while the ledger is already closed.
    *
-   * @param op - One of `tools.register`, `events.on`, `logger.log`, `effect.register`.
+   * @param op - One of `tools.register`, `commands.register`, `events.on`, `logger.log`, `effect.register`.
    * @param payload - Operation arguments.
    * @returns Operation specific acknowledgement sent back to the plugin.
    * @throws {Error} When a registration arrives after unload, the operation is
@@ -158,6 +178,8 @@ export class PluginRegistrar {
     switch (op) {
       case 'tools.register':
         return this.#registerTool(payload)
+      case 'commands.register':
+        return this.#registerCommand(payload)
       case 'events.on':
         return this.#subscribeEvent(payload)
       case 'logger.log':
@@ -167,8 +189,110 @@ export class PluginRegistrar {
       default:
         throw new Error(
           `unsupported operation "${op}" ` +
-          '(whitelist: tools.register, events.on, logger.log, effect.register)',
+          '(whitelist: tools.register, commands.register, events.on, logger.log, effect.register)',
         )
+    }
+  }
+
+  /**
+   * Register one command node on the optional dsh commands service.
+   *
+   * The node carries candidate names in priority order. Each candidate is tried
+   * against the global command namespace; the first one that is not taken wins
+   * and the rest stay unused, so the same node is never registered twice. When
+   * every candidate is already taken the node is skipped: the loader keeps the
+   * command that is already there and the plugin stays applied. A declaration
+   * that is malformed, or a registration failure that is not a name conflict,
+   * still fails the apply handshake.
+   *
+   * @param payload - Request payload carrying one command node.
+   * @returns Whether a candidate was registered, the registered name when it
+   *   was, and the reason when it was not.
+   * @throws {Error} When the declaration is malformed, the node id is repeated
+   *   by the same plugin, or the commands service rejects the registration for
+   *   a reason other than a name conflict.
+   */
+  #registerCommand(
+    payload: Record<string, unknown>,
+  ): { registered: boolean; name?: string; reason?: string } {
+    const declaration = readCommandDeclaration(payload.command, this.spec.id)
+    // Record the declaration before a candidate is chosen, so a node whose
+    // every candidate was taken is still rejected when it is declared twice.
+    if (this.#commandNodeIds.has(declaration.id)) {
+      throw new Error(`plugin ${this.spec.id} already declares command node "${declaration.id}"`)
+    }
+    this.#commandNodeIds.add(declaration.id)
+
+    const service = this.#commandsService
+    if (service === undefined) {
+      this.#logger?.warn?.(
+        `[${this.spec.id}] commands service is unavailable; ` +
+        `command node "${declaration.id}" was not registered`,
+      )
+      return { registered: false, reason: 'commands service is unavailable' }
+    }
+
+    for (const name of declaration.names) {
+      let dispose: Disposer
+      try {
+        dispose = service.register({
+          name,
+          description: declaration.description,
+          ...(declaration.input === undefined ? {} : { input: { hint: declaration.input.hint } }),
+          handler: async (invocation) => await this.#runCommand(
+            declaration.id,
+            invocation?.rawInput ?? '',
+          ),
+        })
+      } catch (error: unknown) {
+        if (!isCommandConflict(error)) throw error
+        this.#logger?.warn?.(
+          `[${this.spec.id}] command "${name}" is already registered; ` +
+          'trying the next candidate name',
+        )
+        continue
+      }
+
+      this.#commandNodes.set(declaration.id, name)
+      this.#commands.set(name, dispose)
+      this.#track(() => {
+        this.#commands.delete(name)
+        dispose()
+      })
+      this.#logger?.debug?.(`[${this.spec.id}] registered command /${name}`)
+      return { registered: true, name }
+    }
+
+    this.#logger?.warn?.(
+      `[${this.spec.id}] every candidate name of command node "${declaration.id}" ` +
+      `is already registered (${declaration.names.join(', ')}); command not registered`,
+    )
+    return { registered: false, reason: 'every candidate command name is already registered' }
+  }
+
+  /**
+   * Run one command node on the backend and normalize its result.
+   *
+   * A failure is returned as an error result instead of being thrown, because
+   * the commands service renders the result and a thrown handler would surface
+   * as an unexpected command failure.
+   *
+   * @param node - Command node id the plugin declared.
+   * @param rawInput - Text after the command name, passed verbatim.
+   * @returns The normalized command result.
+   */
+  async #runCommand(node: string, rawInput: string): Promise<CommandResult> {
+    if (this.#disposed || this.state !== PLUGIN_STATE.APPLIED) {
+      return {
+        kind: 'error',
+        text: `plugin ${this.spec.id} is not active (state=${this.state})`,
+      }
+    }
+    try {
+      const result = await this.instance!.callCommand(node, rawInput)
+      return normalizeCommandResult(result, this.spec.id, node)
+    } catch (error: unknown) {
+      return { kind: 'error', text: messageOf(error) }
     }
   }
 
@@ -292,10 +416,109 @@ export class PluginRegistrar {
       state: this.state,
       tools: [...this.#tools.keys()],
       events: [...this.#subscriptions.keys()],
+      commands: [...this.#commands.keys()],
       registrations: this.registrationCount,
       ...(this.error ? { error: this.error } : {}),
     }
   }
+}
+
+/**
+ * Read and validate one command node declaration.
+ *
+ * The node id defaults to the first candidate name, so a plugin that does not
+ * need a stable routing id can omit it. Candidate names are tried in order.
+ *
+ * @param raw - The `command` member of a `commands.register` payload.
+ * @param pluginId - Plugin that declared the node, used in diagnostics.
+ * @returns The normalized declaration.
+ * @throws {Error} When the declaration is malformed.
+ */
+function readCommandDeclaration(raw: unknown, pluginId: string): CommandDeclaration {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('commands.register requires payload.command')
+  }
+  const record = raw as Record<string, unknown>
+  const names = record.names
+  if (!Array.isArray(names) || names.length === 0 || names.some((name) => typeof name !== 'string')) {
+    throw new Error(`plugin ${pluginId} command node requires a non-empty names array`)
+  }
+  const id = typeof record.id === 'string' && record.id.length > 0
+    ? record.id
+    : names[0] as string
+  if (id.length > 64) {
+    throw new Error(`plugin ${pluginId} command node id "${id}" must be at most 64 characters`)
+  }
+
+  const seen = new Set<string>()
+  for (const name of names as string[]) {
+    if (!COMMAND_NAME_PATTERN.test(name)) {
+      throw new Error(
+        `plugin ${pluginId} command node "${id}": name "${name}" must match ` +
+        String(COMMAND_NAME_PATTERN),
+      )
+    }
+    if (seen.has(name)) {
+      throw new Error(`plugin ${pluginId} command node "${id}" repeats candidate name "${name}"`)
+    }
+    seen.add(name)
+  }
+
+  const description = record.description
+  if (typeof description !== 'string' || description.trim().length === 0) {
+    throw new Error(`plugin ${pluginId} command node "${id}" requires a non-empty description`)
+  }
+
+  let input: CommandInputHint | undefined
+  if (record.input !== undefined) {
+    if (record.input === null || typeof record.input !== 'object' || Array.isArray(record.input)) {
+      throw new Error(`plugin ${pluginId} command node "${id}" input must be an object`)
+    }
+    const hint = (record.input as Record<string, unknown>).hint
+    if (typeof hint !== 'string' || hint.trim().length === 0) {
+      throw new Error(`plugin ${pluginId} command node "${id}" input.hint must be a non-empty string`)
+    }
+    input = { hint }
+  }
+
+  return {
+    id,
+    names: names as string[],
+    description,
+    ...(input === undefined ? {} : { input }),
+  }
+}
+
+/** Return true when a registration failure means the command name is taken. */
+function isCommandConflict(error: unknown): boolean {
+  return error instanceof Error && /already registered/i.test(error.message)
+}
+
+/**
+ * Normalize the value a command node returned.
+ *
+ * A bare string is accepted as a successful text result, because it is the
+ * natural return type of a small command handler. Anything else must be a
+ * {@link CommandResult}.
+ *
+ * @param value - Value the backend returned.
+ * @param pluginId - Plugin that ran the command, used in diagnostics.
+ * @param node - Command node id, used in diagnostics.
+ * @returns The normalized result. An invalid value becomes an error result.
+ */
+function normalizeCommandResult(value: unknown, pluginId: string, node: string): CommandResult {
+  if (typeof value === 'string') return { kind: 'success', text: value }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { kind: 'error', text: `plugin ${pluginId} command "${node}" returned an invalid result` }
+  }
+  const record = value as { kind?: unknown; text?: unknown }
+  if (record.kind === 'success' && typeof record.text === 'string') {
+    return { kind: 'success', text: record.text }
+  }
+  if (record.kind === 'error' && typeof record.text === 'string' && record.text.trim().length > 0) {
+    return { kind: 'error', text: record.text }
+  }
+  return { kind: 'error', text: `plugin ${pluginId} command "${node}" returned an invalid result` }
 }
 
 /** Run one disposer and swallow its failure, including an asynchronous one. */

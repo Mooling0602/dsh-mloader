@@ -11,6 +11,8 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+/** Command name grammar accepted by the loader and by dsh. */
+export const COMMAND_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/u;
 /** Events an external plugin may subscribe to. */
 export const EVENT_WHITELIST = new Set([
     'tools/execute',
