@@ -125,9 +125,9 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 - [docs/ABI-unified](docs/ABI-unified.zh.md)：面向第三方插件作者的共享契约，包括清单格式、能力白名单、RPC 协议、生命周期、后端接口、安全模型和安装布局。
 - [docs/python-sdk/PyABI](docs/python-sdk/PyABI.zh.md)：Python 后端契约，包括 SDK 导入方式、两种注册风格、结果 schema 推断和进程传输。
 - [docs/wasm/WasmABI](docs/wasm/WasmABI.zh.md)：WebAssembly 核心 ABI，包括必需导出、声明对象和 worker 超时。
-- [docs/Package](docs/Package.zh.md)：两种后端共用的归档格式与安装规则。Python 后端已经实现，WebAssembly 后端仍是目标契约。
+- [docs/Package](docs/Package.zh.md)：两种后端共用的归档格式与安装规则。Python 后端已经实现；WebAssembly 的包格式已固定，但还没有安装器。
 - [docs/python-sdk/Package](docs/python-sdk/Package.zh.md)：Python 插件包布局、依赖、共享环境和命令行。
-- [docs/wasm/Package](docs/wasm/Package.zh.md)：WebAssembly 插件包的目标元数据与目录布局，目标契约。
+- [docs/wasm/Package](docs/wasm/Package.zh.md)：WebAssembly 插件包布局，一份清单和一个便携 `.wasm` 入口。
 - [CONTEXT](CONTEXT.md)：面向维护者的技术细节，包括构建与产物策略、配置默认值、测试方法和重启验收清单。
 - [seeds](seeds/README.md)：随包示例源码，包括自动释放的 Python 示例和只含源码的 Rust WebAssembly 示例。
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk)：Python SDK 包，是 `src/runtime/python_sdk/` 的镜像，带打包元数据和测试。

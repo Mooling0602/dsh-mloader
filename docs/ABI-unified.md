@@ -8,7 +8,7 @@ The companion documents specify the backend contracts and the package format:
 
 - [python-sdk/PyABI](python-sdk/PyABI.md) specifies the Python runtime package, the two registration styles, the result schema inference and the child process transport.
 - [wasm/WasmABI](wasm/WasmABI.md) specifies the WebAssembly core ABI and the worker isolation.
-- [Package](Package.md) specifies the archive format and the installation rules shared by both backends. The Python backend implements it through the runtime command line; the WebAssembly backend remains a target contract.
+- [Package](Package.md) specifies the archive format and the installation rules shared by both backends. The Python backend implements it through the runtime command line; the WebAssembly package format is fixed and no installer implements it yet.
 - [python-sdk/Package](python-sdk/Package.md) and [wasm/Package](wasm/Package.md) specify the backend package layouts.
 
 The current wire protocol is version 1. A change to a frame shape, a manifest field or the capability whitelist is a contract change, and a change that crosses the process or thread boundary requires a protocol version bump.
@@ -70,7 +70,7 @@ The tool names, event subscriptions and log entries that result from those decla
 
 ### 2.1 Manifest: `mloader.plugin.json`
 
-The manifest is the authoritative source of plugin identity and backend selection. It lives at the plugin root and names either the entry file or the platform targets.
+The manifest is the authoritative source of plugin identity and backend selection. It lives at the plugin root and names the entry file.
 
 ```json
 {
@@ -91,10 +91,9 @@ The manifest is the authoritative source of plugin identity and backend selectio
 | --- | --- | --- | --- | --- |
 | `id` | yes | string | none | Plugin identifier, `^[a-z0-9][a-z0-9_-]{0,31}$`. Also the namespace used by logs. |
 | `name` | no | string | `id` | Human readable name. |
-| `version` | no | string | `"0.0.0"` | Informational version string. A manifest with `targets` must use a Semantic Versioning 2.0.0 string. |
+| `version` | no | string | `"0.0.0"` | Informational version string. |
 | `backend` | yes | `"python"` or `"wasm"` | none | Selects the backend that hosts the plugin. |
-| `entry` | conditionally | string | none | Entry file path relative to the manifest directory. It is resolved to an absolute path. It is required when `targets` is absent, and it must be absent when `targets` is present. |
-| `targets` | conditionally | array | none | WebAssembly package targets, specified in [wasm/Package](wasm/Package.md) section 1. It is required for an installable WebAssembly package and absent for a directory-installed plugin. It is valid only with `"backend": "wasm"`, and a manifest with `targets` has no top-level `entry`. |
+| `entry` | yes | string | none | Entry file path relative to the manifest directory. It is resolved to an absolute path. |
 | `enabled` | no | boolean | `true` | When `false`, the plugin is discovered and reported but not started. |
 | `inject` | no | string[] | `[]` | Metadata forwarded to the plugin in its startup payloads. It grants no capability and resolves no host service. |
 | `capabilities` | no | object | all `true` | Switches `tools`, `events`, `logger`, `effect` and `commands`. They are declared metadata: v1 does not enforce them, so setting one to `false` states intent only. The enforced boundaries are the registration operation whitelist in §3 and the event whitelist in §3.3. |
@@ -105,8 +104,6 @@ The manifest is the authoritative source of plugin identity and backend selectio
 The id `hello-mloader` is reserved for the bundled example. Discovery accepts that id only when the directory carries `.mloader.builtin.json` with the matching id and `source` set to `dsh-mloader`; a manifest with the reserved id and no valid marker is rejected.
 
 Fields that are not listed are ignored and do not reach the plugin.
-
-`targets` is the target contract for installable WebAssembly packages. The loader does not install a WebAssembly plugin from an archive, and a directory-installed WebAssembly plugin continues to use `entry`.
 
 ### 2.2 Discovery
 
@@ -446,7 +443,7 @@ External plugins are installed under the profile, not inside the loader package:
 
 The directory name is a convention. The plugin id comes from the manifest, not from the directory name.
 
-A plugin is installed by placing its directory under one of the plugin roots. A Python package can be installed from an archive with the runtime command line; [python-sdk/Package](python-sdk/Package.md) section 6 specifies the commands, and the loader itself never reads an archive. Python plugins run in the shared environment of the profile when the loader manages one, so a plugin that needs an isolated dependency set is not supported. The package format in [Package](Package.md) is implemented for Python and remains a target contract for WebAssembly.
+A plugin is installed by placing its directory under one of the plugin roots. A Python package can be installed from an archive with the runtime command line; [python-sdk/Package](python-sdk/Package.md) section 6 specifies the commands, and the loader itself never reads an archive. Python plugins run in the shared environment of the profile when the loader manages one, so a plugin that needs an isolated dependency set is not supported. The package format in [Package](Package.md) is implemented for Python. The WebAssembly package format is fixed in [wasm/Package](wasm/Package.md), and no installer implements it yet.
 
 The profile's `node_modules` is not a supported install location. It is owned by the package manager, and `pnpm install` or `pnpm prune` can rebuild it, so hand-placed plugins there are not stable.
 
@@ -495,4 +492,4 @@ They are internal to dsh-mloader and are not part of the external plugin ABI. An
 9. It does not restart a crashed plugin automatically.
 10. It does not watch the files inside an installed plugin. A changed manifest or entry file takes effect only after a reload or a restart.
 11. It does not give a Python plugin its own environment or select a Python version. All Python plugins of one profile share one environment created from the configured interpreter.
-12. It does not install a package from an archive on its own. The Python runtime command line performs that installation.
+12. It does not install a package from an archive on its own. The Python runtime command line performs that installation, and no tool installs a WebAssembly package yet.

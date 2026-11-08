@@ -201,6 +201,6 @@ The loader never runs `pack` or `install` on its own. It runs `env sync` before 
 - **Python 3.10 or later.** The plugin runs in the shared environment created from `pythonBin`, and the archive carries only the files the packager includes.
 - **No Python version selection.** The environment inherits the interpreter named by `pythonBin`; a `requires-python` declaration is ignored with a warning.
 - **One shared environment.** All Python plugins of a profile share one environment. A plugin that needs an isolated dependency set is not supported.
-- **No platform targets.** `targets` is a WebAssembly package field; a Python manifest must not set it. Python code is not selected per operating system or CPU architecture by the package format.
+- **No platform selection.** The package format selects no artifact by operating system or CPU architecture. A Python plugin starts from the file its manifest `entry` names.
 - **Native extensions are the plugin's responsibility.** An extension module is importable only when it matches the interpreter ABI and the platform. The package format does not verify that, so a plugin that needs one documents the requirement.
 - **No executable archive at install time.** A `.pyz` may be executable when the user runs it, but the installer only extracts it and never executes the archive.

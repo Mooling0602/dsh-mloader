@@ -125,9 +125,9 @@ The shape of each value, the bytecode cache trade-off and the restart checklist 
 - [docs/ABI-unified](docs/ABI-unified.md): the shared contract for third-party plugin authors, including the manifest schema, the capability whitelist, the RPC protocol, the lifecycle, the backend interface, the security model and the installation layout.
 - [docs/python-sdk/PyABI](docs/python-sdk/PyABI.md): the Python backend contract, including the SDK import, the two registration styles, result schema inference and the process transport.
 - [docs/wasm/WasmABI](docs/wasm/WasmABI.md): the WebAssembly core ABI, including the required exports, the declaration object and the worker deadlines.
-- [docs/Package](docs/Package.md): the archive format and installation rules shared by both backends. The Python backend implements them; the WebAssembly backend remains a target contract.
+- [docs/Package](docs/Package.md): the archive format and installation rules shared by both backends. The Python backend implements them; the WebAssembly package format is fixed but has no installer yet.
 - [docs/python-sdk/Package](docs/python-sdk/Package.md): the Python package layout, dependencies, shared environment and command line.
-- [docs/wasm/Package](docs/wasm/Package.md): the WebAssembly package targets and directory layout, specified as a target contract.
+- [docs/wasm/Package](docs/wasm/Package.md): the WebAssembly package layout, one manifest and one portable `.wasm` entry.
 - [CONTEXT](CONTEXT.md): technical detail for maintainers, including the build and artifact policy, configuration defaults, test recipes and the restart checklist.
 - [seeds](seeds/README.md): the bundled example sources, including the released Python example and the source-only Rust WebAssembly example.
 - [dsh-mloader-python-sdk](https://github.com/Mooling0602/dsh-mloader-python-sdk): the Python SDK package, a mirror of `src/runtime/python_sdk/` with the packaging metadata and tests.

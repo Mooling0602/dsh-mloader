@@ -2,24 +2,30 @@
 
 English | [简体中文](Package.zh.md)
 
-This document specifies the layout of a dsh-mloader WebAssembly plugin package. The archive container, extraction safety, install index, updates, removal, version compatibility and the shared limits are specified in [Package](../Package.md). This document adds the WebAssembly-specific target metadata, platform selection and directory layout.
+This document specifies the layout of a dsh-mloader WebAssembly plugin package, the archive that carries one compiled WebAssembly module. The archive container, extraction safety, install index, updates, removal, version compatibility and the shared limits are specified in [Package](../Package.md). This document adds the WebAssembly-specific layout and the limits that follow from one portable artifact.
 
-Status: target contract. The loader does not install a plugin from an archive; a WebAssembly plugin is a directory holding its `.wasm` entry. The shared archive rules and this layout are fixed before the implementation lands.
+Status: the format is fixed. No installer implements it yet, so the loader still reads an installed plugin directory only. Extracting a package into a plugin root installs the plugin by hand, and the archive rules in [Package](../Package.md) describe the install, update and removal behavior an installer implements.
 
-A WebAssembly package is a zip archive. It holds one manifest at the archive root and one or more compiled WebAssembly artifacts. The artifacts are platform-specific builds, so the manifest maps the host operating system and CPU architecture to the artifact that hosts it.
+A WebAssembly module is portable across operating systems and CPU architectures. A package therefore carries one module and has no platform metadata, no per-host directory and no artifact selection step. The manifest names the module with `entry`, the same way a directory-installed plugin does.
 
 ## Contents
 
-- [1. Target metadata](#1-target-metadata)
-- [2. Platform selection](#2-platform-selection)
-- [3. Single-architecture package](#3-single-architecture-package)
-- [4. Multi-architecture package](#4-multi-architecture-package)
-- [5. Building a WebAssembly package](#5-building-a-webassembly-package)
-- [6. WebAssembly-specific limits](#6-webassembly-specific-limits)
+- [1. Package contents](#1-package-contents)
+- [2. The portable artifact](#2-the-portable-artifact)
+- [3. Building a package](#3-building-a-package)
+- [4. WebAssembly-specific limits](#4-webassembly-specific-limits)
 
-## 1. Target metadata
+## 1. Package contents
 
-A WebAssembly package adds a `targets` array to `mloader.plugin.json`. The top-level `entry` field is absent when `targets` is present.
+The format defines these entries at the archive root:
+
+| Entry | Required | Meaning |
+| --- | --- | --- |
+| `mloader.plugin.json` | yes | The plugin manifest, specified in [ABI-unified](../ABI-unified.md) section 2.1. |
+| The entry file | yes | The WebAssembly module named by the manifest `entry` field. |
+| `.mloader.index.json` | no | Optional per file checksums published by the packager, specified in [Package](../Package.md) section 4.1. |
+
+A minimal package carries a manifest and one module:
 
 ```json
 {
@@ -27,183 +33,65 @@ A WebAssembly package adds a `targets` array to `mloader.plugin.json`. The top-l
   "name": "Plugin",
   "version": "0.1.0",
   "backend": "wasm",
-  "targets": [
-    { "os": "windows", "arch": "x64", "compiler": "gcc", "entry": "plugin-id-windows/x64/libname.dll" },
-    { "os": "linux", "arch": "x64", "entry": "plugin-id-linux/x64/libname.so" },
-    { "os": "linux", "arch": "aarch64", "entry": "plugin-id-linux/aarch64/libname.so" }
-  ]
+  "entry": "plugin.wasm"
 }
 ```
 
-| Field | Required | Type | Meaning |
-| --- | --- | --- | --- |
-| `targets` | yes | array | One or more targets. At least one is required. |
-| `targets[].os` | yes | string | `windows`, `linux`, `darwin` or `android`. |
-| `targets[].arch` | yes | string | `x64` or `aarch64`; `amd64` and `arm64` are accepted aliases. |
-| `targets[].compiler` | no | string | Informational. A language or a compiler name such as `gcc` or `msvc`. It selects nothing. |
-| `targets[].entry` | yes | string | Path to the artifact, relative to the archive root. |
-| `version` | yes | string | Semantic version of the plugin. |
-
-- `targets` is valid only with `"backend": "wasm"`. A Python manifest that sets it is rejected.
-- A manifest with `targets` has no top-level `entry`. A manifest with both is rejected.
-- The array must contain at least one target, and no two targets may normalize to the same operating system and architecture pair.
-- `version` must be a valid Semantic Versioning 2.0.0 string. The general manifest default `0.0.0` is valid, but a package sets its release version.
-- The `os` and `arch` values are lowercase and case-sensitive. `arch` aliases normalize to the canonical value before comparison: `amd64` becomes `x64`, and `arm64` becomes `aarch64`.
-- A value outside the supported `os` or `arch` set produces a warning, not a manifest error. The target remains a legal target; section 2 states how selection treats it.
-- `compiler` is informational. It has no effect on selection, and the loader does not compare it with a build tool.
-- The loader does not inspect the artifact to verify the declared operating system or architecture. The metadata is the contract; an incompatible artifact fails when it is instantiated.
-
-## 2. Platform selection
-
-The loader selects one target for the running host:
-
-| Host source | Canonical value |
-| --- | --- |
-| `process.platform` `win32` | `windows` |
-| `process.platform` `linux` | `linux` |
-| `process.platform` `darwin` | `darwin` |
-| `process.platform` `android` | `android` |
-| `process.arch` `x64` | `x64` |
-| `process.arch` `arm64` | `aarch64` |
-
-- A target is selected when its normalized `os` and `arch` equal the host values.
-- When exactly one target matches, the loader uses its `entry` and ignores the other artifacts.
-- When no target matches and the package has exactly one target, the loader uses that target and logs a warning. This keeps a package with an unrecognized platform value loadable, as section 1 requires.
-- When no target matches and the package has two or more targets, the plugin is `disabled` with a warning that names the host values and the available targets. It is not `failed`, because the package is valid and simply does not target this host.
-- When more than one target matches, the manifest is invalid, because two targets normalized to the same operating system and architecture pair.
-- On Termux, Node may report `linux`. The loader treats a process that carries `TERMUX_VERSION`, or a `PREFIX` under `com.termux`, as `android`, and it prefers an `android` target over a `linux` target.
-- A host value that is not in the table has no canonical value. It follows the same rule: a single-target package loads with a warning, and a multi-target package with no match is `disabled`.
-
-## 3. Single-architecture package
-
-A package with exactly one target is a single-architecture package. Its conventional file name is:
-
-```plaintext
-<plugin-id>-<os>-<arch>-[compiler]-v<semver>.mloader.pack
-```
-
-Examples:
-
-```plaintext
-plugin-id-linux-x64-gcc-v0.1.0.mloader.pack
-plugin-id-windows-aarch64-v0.1.0.zip
-```
-
-- `<plugin-id>` is the manifest `id`, `<os>` and `<arch>` are the target values, `[compiler]` is optional, and `<semver>` is the manifest `version` prefixed with `v`.
-- The file name is a convention. The loader never parses it, so any legal file name works. The manifest is the authority.
-- `.mloader.pack` and `.zip` are the conventional suffixes. A WebAssembly package is never an executable application.
-
-Root layout:
-
-- The archive root holds `mloader.plugin.json` and the target artifact.
-- The artifact is either directly at the archive root or inside one directory named exactly `<plugin-id>/`.
-- At most one root directory is allowed, and its name must equal the plugin id. An additional root directory is rejected.
-- Other files may sit beside the entry, including additional binary artifacts and data files. The target `entry` names the one the loader uses.
-- The entry must exist and must lie inside the package root or the `<plugin-id>/` directory.
-
-A package without a directory:
-
 ```plaintext
 mloader.plugin.json
-libname.wasm
+plugin.wasm
 ```
 
-A package with a plugin id directory:
+- The manifest is at the archive root. Packing the plugin directory itself, so that the archive holds `plugin-id/mloader.plugin.json`, produces an invalid package, because a manifest below the archive root describes no plugin ([Package](../Package.md) section 2).
+- The entry file is a file at the archive root. In a package, `entry` is therefore a bare file name and never a path with a separator.
+- The entry file carries the `.wasm` suffix by convention. The manifest is the authority, and no part of the format guesses a file name.
+- A manifest that names an entry the archive does not hold is an invalid package.
+- Other files may sit beside the module, including a license or a notice. The module cannot read them, because the ABI grants no file system access ([WasmABI](WasmABI.md) section 4).
 
-```plaintext
-mloader.plugin.json
-plugin-id/libname.wasm
-plugin-id/helper.wasm
-```
+### 1.1 Manifest requirements
 
-## 4. Multi-architecture package
+The manifest is the shared manifest of [ABI-unified](../ABI-unified.md) section 2.1. A package sets these fields, and the shared defaults apply to the rest:
 
-A package with two or more targets is a multi-architecture package. Its conventional file name omits the operating system, architecture and compiler:
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `id` | yes | Plugin id. It also names the installed directory and the file name convention of section 3. |
+| `backend` | yes | `"wasm"`. |
+| `entry` | yes | File name of the module, relative to the archive root. |
+| `version` | no | Release version. Section 3 uses it in the conventional file name; the loader treats it as informational. |
 
-```plaintext
-<plugin-id>-v<semver>.mloader.pack
-```
+- The manifest carries no platform field and no target list. The format has nothing to select per host.
+- `env` is ignored by the WebAssembly backend, and `capabilities` is declared metadata, exactly as the shared manifest table states.
 
-The file name is a convention; the loader never parses it. The manifest `targets` array is the authority for which artifacts exist and where they are.
+## 2. The portable artifact
 
-Root layout:
+- The package defines one WebAssembly module, and that module runs on every supported host. There is no per-host directory and no fallback artifact.
+- The module is a WebAssembly binary. It must satisfy the core ABI of [WasmABI](WasmABI.md) section 1: the `memory` export and the five functions, with `mloader_abi_version` reporting `1`. It may import the WASI preview1 functions of [WasmABI](WasmABI.md) section 4, and it imports nothing else.
+- Portability is a property of the module and the host engine, not of the operating system or the CPU architecture. The same module runs on every supported host when the host engine supports the WebAssembly features the module uses and the module imports only what [WasmABI](WasmABI.md) sections 1 and 4 allow. Because the loader requires Node.js 20 or later, a module that must load on every supported host uses only the features of the minimum supported Node.js version. A module that needs a missing feature or an import outside those sections fails at instantiation and marks the plugin `failed`; the format does not fall back to another artifact.
+- The archive is transport. The extracted plugin directory holds the module, and the loader resolves `entry` against that directory, exactly as for a directory-installed plugin.
+- The loader does not compile or validate the module at discovery. The worker compiles, instantiates and checks it when the plugin starts, and a module that fails compilation, instantiation or the version check marks the plugin `failed` ([WasmABI](WasmABI.md) section 5).
 
-- The archive root holds `mloader.plugin.json`.
-- Each target `entry` lies under a platform directory named for its target, in one of two forms:
-  - `<plugin-id>-<os>/<arch>/<file>`
-  - `<plugin-id>-<os>-<arch>/<file>`
-- The directory segments must equal the normalized target values. The `<os>` segment and the `<arch>` segment are compared with the target's `os` and `arch`.
-- The loader strips the exact `<plugin-id>-` prefix before it parses the platform segments. A plugin id that contains hyphens therefore remains unambiguous, and the platform segments are parsed from the remainder.
-- The entry file is directly inside the architecture directory. The loader rejects an entry path that adds another directory level for platform information.
-- Every root directory must be a platform directory used by at least one target. An unreferenced root directory is rejected.
-- A bare `<plugin-id>/` directory is not allowed in a multi-architecture package. That form belongs to the single-architecture layout.
-- The two forms may be mixed across targets, for example one target under `<plugin-id>-windows/x64/` and another under `<plugin-id>-linux-x64/`.
-- Compiler information is not part of a platform directory name. It would be ambiguous with the plugin id and the architecture segments, so use the optional `compiler` field or the file name instead.
+## 3. Building a package
 
-A package that supports Windows and Linux, each on x64 and aarch64:
-
-```plaintext
-mloader.plugin.json
-plugin-id-windows/x64/libname.dll
-plugin-id-windows/aarch64/libname.dll
-plugin-id-linux/x64/libname.so
-plugin-id-linux/aarch64/libname.so
-```
-
-The same targets in the combined form:
-
-```plaintext
-mloader.plugin.json
-plugin-id-windows-x64/libname.dll
-plugin-id-windows-aarch64/libname.dll
-plugin-id-linux-x64/libname.so
-plugin-id-linux-aarch64/libname.so
-```
-
-Rejected layouts:
-
-```plaintext
-plugin-id-windows/windows/libname.dll      # the os directory is nested twice
-plugin-id-windows/x64/x64/libname.dll      # the arch directory is nested twice
-plugin-id-windows-x64/x64/libname.dll      # the combined form adds a redundant arch directory
-plugin-id-windows/libname.dll              # the arch directory is missing
-plugin-id/linux/x64/libname.wasm           # a bare plugin id directory is not a multi-target form
-plugin-id-linux-x64/extra/libname.so       # the entry is not directly inside the arch directory
-```
-
-The loader reports the offending path and rejects the package. It does not load a partial layout.
-
-A multi-architecture package may target one operating system with several architectures, several operating systems with one architecture, or any other combination. Each target is independent.
-
-## 5. Building a WebAssembly package
-
-Build one artifact per target, then zip the manifest and the platform directories.
-
-A single-architecture package:
+Any zip writer produces a valid package. A conventional build from a plugin directory looks like this:
 
 ```sh
 cd my-plugin
-zip -r ../plugin-id-linux-x64-gcc-v0.1.0.mloader.pack mloader.plugin.json plugin-id/libname.wasm
+zip -r ../plugin-id-v0.1.0.mloader.pack mloader.plugin.json plugin.wasm
 ```
 
-A multi-architecture package:
-
-```sh
-cd my-plugin
-zip -r ../plugin-id-v0.1.0.mloader.pack mloader.plugin.json plugin-id-windows plugin-id-linux
-```
-
-- The manifest stays at the archive root. Packing the plugin directory itself produces an invalid package.
-- The target `entry` paths are relative to the archive root and must match the files in the archive exactly.
-- Build the release archive once. Repacking changes the MD5 and is treated as a new version ([Package](../Package.md) section 4.2).
-- Do not include build caches, source maps or debug artifacts that the plugin does not need.
+- The manifest and the module are at the archive root. The manifest `entry` matches the file name in the archive exactly.
+- The conventional file name is `<plugin-id>-v<version>.mloader.pack`. The name is a convention, the loader never parses it, and the manifest is the authority ([Package](../Package.md) section 1).
+- Build the release archive once and distribute that file. Repacking identical content changes the MD5, because the zip metadata changes, and the result is treated as a new version ([Package](../Package.md) section 4.2).
+- Do not include build caches, source maps, intermediate object files or a second module. The module cannot read them, and nothing in the format selects or loads another module.
 - A WebAssembly package is not executable. Do not add a shebang or a `__main__.py`, and do not use the `.pyz` suffix.
+- A packager may include a `.mloader.index.json` with `fileMd5` to publish per file checksums ahead of installation ([Package](../Package.md) section 4.1).
 
-## 6. WebAssembly-specific limits
+## 4. WebAssembly-specific limits
 
-- **A package declares targets.** A WebAssembly package without `targets` does not declare which artifact runs on which platform, so the loader cannot select one. A directory-installed WebAssembly plugin may keep the top-level `entry` form of the general manifest; a package uses `targets`.
-- **No cross-platform fallback beyond one target.** A multi-architecture package with no matching target is `disabled`, not executed with an incompatible artifact.
-- **The WebAssembly backend is off by default.** The operator sets `wasm.enabled` to `true` before a WebAssembly plugin starts ([CONTEXT](../../CONTEXT.md)).
+- **One artifact for every host.** A WebAssembly module is portable across operating systems and CPU architectures, so a package is never split per platform. There is no platform selection, no per-host directory and no fallback artifact.
+- **No native library.** A package carries a WebAssembly module only. A native shared library such as a `.dll` or a `.so` file is not a WebAssembly module, and no backend loads one.
+- **No artifact inspection at installation.** The format does not read the module to verify it. Compilation, instantiation and the ABI version check happen when the worker starts, and a mismatch marks the plugin `failed`.
 - **No WASI preopens, no network and no environment.** The execution contract is in [WasmABI](WasmABI.md) section 4.
 - **No executable archive.** `.pyz` is a Python convention; a WebAssembly package is always data.
-- **No artifact inspection.** The loader does not read the WebAssembly binary to verify its target. The metadata is the contract.
+- **No dependency contract.** The shared format carries no dependency declaration, and a WebAssembly package cannot add one ([Package](../Package.md) section 6).
+- **The WebAssembly backend is off by default.** The operator sets `wasm.enabled` to `true` before a WebAssembly plugin starts ([CONTEXT](../../CONTEXT.md)).

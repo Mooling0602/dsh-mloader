@@ -80,7 +80,7 @@ docs/Package.md             shared package format and install rules, implemented
 docs/python-sdk/PyABI.md   Python backend contract and SDK
 docs/python-sdk/Package.md Python package layout, dependencies and command line
 docs/wasm/WasmABI.md       WebAssembly core ABI
-docs/wasm/Package.md       WebAssembly package targets and layout
+docs/wasm/Package.md       WebAssembly package layout, one portable .wasm entry
 ```
 
 Each document under `docs/` has a Simplified Chinese counterpart at the same path with a `.zh.md` suffix. Each pair carries a language selector at the top that links to the other.
@@ -196,6 +196,12 @@ dsh-mloader-sdk remove my-plugin --yes
 The command derives the profile from the environment path, so `--profile` is optional; it still selects another profile when supplied. The same commands are available from a checkout through `python3 src/runtime/python_sdk/run_cli.py`, and from an installed package through `<profile>/node_modules/dsh-mloader/src/runtime/python_sdk/run_cli.py`.
 
 `install` writes the directory the loader discovers, merges requirements into pyproject, prepares the shared environment and writes `.mloader.index.json`. It never runs the plugin entry. `--force` confirms a reinstall of the same archive or of a directory whose files changed after installation. `uv` must be on `PATH`; a requirements only package may create the environment with `python -m venv` and reports a warning.
+
+### WebAssembly plugin packages
+
+- **The format is one portable artifact.** A package carries `mloader.plugin.json` and one `.wasm` entry at the archive root, with no platform metadata and no artifact selection ([docs/wasm/Package.md](docs/wasm/Package.md)). A WebAssembly module is portable across operating systems and CPU architectures, so a per-host build would describe a difference the runtime does not have.
+- **No installer implements the format.** The loader reads installed directories only, so extracting a package into a plugin root installs it by hand.
+- **The installer is a Node tool of this repository.** It uses the Node.js runtime the loader already requires, not the Python runtime package, and it builds no native artifacts. A graphical installer with a file picker or an upload surface is out of scope for now.
 
 ### Build
 

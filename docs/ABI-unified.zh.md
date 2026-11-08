@@ -8,7 +8,7 @@
 
 - [python-sdk/PyABI](python-sdk/PyABI.zh.md) 规定 Python 运行时包、两种注册风格、结果 schema 推断和子进程传输。
 - [wasm/WasmABI](wasm/WasmABI.zh.md) 规定 WebAssembly 核心 ABI 和 worker 隔离。
-- [Package](Package.zh.md) 规定两种后端共用的归档格式和安装规则。Python 后端通过运行时命令行实现它；WebAssembly 后端仍是目标契约。
+- [Package](Package.zh.md) 规定两种后端共用的归档格式和安装规则。Python 后端通过运行时命令行实现它；WebAssembly 的包格式已固定，但还没有安装器实现它。
 - [python-sdk/Package](python-sdk/Package.zh.md) 和 [wasm/Package](wasm/Package.zh.md) 规定各后端的包布局。
 
 当前线上协议是版本 1。修改帧形状、清单字段或能力白名单都是契约变更；跨越进程或线程边界的变更需要提升协议版本。
@@ -70,7 +70,7 @@ dsh main process (Node, Cordis)
 
 ### 2.1 清单：`mloader.plugin.json`
 
-清单是插件身份和后端选择的权威来源。它位于插件根，指定入口文件或平台目标。
+清单是插件身份和后端选择的权威来源。它位于插件根，指定入口文件。
 
 ```json
 {
@@ -91,10 +91,9 @@ dsh main process (Node, Cordis)
 | --- | --- | --- | --- | --- |
 | `id` | 是 | 字符串 | 无 | 插件标识符，`^[a-z0-9][a-z0-9_-]{0,31}$`。也是日志使用的命名空间。 |
 | `name` | 否 | 字符串 | `id` | 人类可读名称。 |
-| `version` | 否 | 字符串 | `"0.0.0"` | 信息性版本字符串。带 `targets` 的清单必须使用 Semantic Versioning 2.0.0 字符串。 |
+| `version` | 否 | 字符串 | `"0.0.0"` | 信息性版本字符串。 |
 | `backend` | 是 | `"python"` 或 `"wasm"` | 无 | 选择托管插件的后端。 |
-| `entry` | 条件必需 | 字符串 | 无 | 相对于清单目录的入口文件路径。会解析为绝对路径。`targets` 不存在时必需，`targets` 存在时必须不存在。 |
-| `targets` | 条件必需 | 数组 | 无 | WebAssembly 包目标，见 [wasm/Package](wasm/Package.zh.md) 第 1 节。只对 `"backend": "wasm"` 有效。可安装的 WebAssembly 包需要它，以目录安装的插件没有它。带 `targets` 的清单没有顶层 `entry`。 |
+| `entry` | 是 | 字符串 | 无 | 相对于清单目录的入口文件路径。会解析为绝对路径。 |
 | `enabled` | 否 | 布尔 | `true` | 为 `false` 时插件会被发现并报告，但不启动。 |
 | `inject` | 否 | 字符串数组 | `[]` | 在启动载荷中转发给插件的元数据。不授予能力，也不解析宿主服务。 |
 | `capabilities` | 否 | 对象 | 全 `true` | 开关 `tools`、`events`、`logger`、`effect` 和 `commands`。它们是声明性元数据：v1 不强制执行，所以设为 `false` 只表示意图。强制边界是第 3 节的注册操作白名单和第 3.3 节的事件白名单。 |
@@ -105,8 +104,6 @@ dsh main process (Node, Cordis)
 `hello-mloader` 这个 id 专供随包示例使用。只有目录中带有 `.mloader.builtin.json`，且其中 id 匹配、`source` 为 `dsh-mloader` 时，发现过程才接受这个 id；带保留 id 而没有有效标记的清单会被拒绝。
 
 未列出的字段会被忽略，不会到达插件。
-
-`targets` 是面向可安装 WebAssembly 包的目标契约。加载器目前不会从归档安装 WebAssembly 插件，以目录安装的 WebAssembly 插件继续使用 `entry`。
 
 ### 2.2 发现
 
@@ -446,7 +443,7 @@ Python 沙箱是进程隔离，不是权限隔离。Python 插件可以读写文
 
 目录名只是约定。插件 id 来自清单，不来自目录名。
 
-插件通过把它的目录放进一个插件根目录来安装。Python 包可以用运行时命令行从归档安装；命令见 [python-sdk/Package](python-sdk/Package.zh.md) 第 6 节，加载器本身从不读取归档。加载器管理共享环境时，一个 profile 的 Python 插件都在该环境中运行，所以需要隔离依赖集合的插件不受支持。[Package](Package.zh.md) 的包格式对 Python 已实现，对 WebAssembly 仍是目标契约。
+插件通过把它的目录放进一个插件根目录来安装。Python 包可以用运行时命令行从归档安装；命令见 [python-sdk/Package](python-sdk/Package.zh.md) 第 6 节，加载器本身从不读取归档。加载器管理共享环境时，一个 profile 的 Python 插件都在该环境中运行，所以需要隔离依赖集合的插件不受支持。[Package](Package.zh.md) 的包格式对 Python 已实现。[wasm/Package](wasm/Package.zh.md) 固定了 WebAssembly 的包格式，但还没有安装器实现它。
 
 profile 的 `node_modules` 不是受支持的安装位置。它归包管理器所有，`pnpm install` 或 `pnpm prune` 可以重建它，所以手工放在那里的插件不稳定。
 
@@ -495,4 +492,4 @@ dsh-mloader 为运行 dsh 的人提供三个操作界面：
 9. 不自动重启崩溃的插件。
 10. 不监听已安装插件内部的文件。清单或入口文件变化只有在重新加载或重启后才生效。
 11. 不给 Python 插件单独的环境，也不选择 Python 版本。同一个 profile 的所有 Python 插件共用一个由配置解释器创建的环境。
-12. 不自行从归档安装包。Python 运行时命令行负责这项安装。
+12. 不自行从归档安装包。Python 运行时命令行负责这项安装，目前也没有工具安装 WebAssembly 包。

@@ -4,9 +4,9 @@
 
 本文规定承载可安装 dsh-mloader 插件的归档，以及所有包共用的安装、更新和删除规则。它适用于 Python 包和 WebAssembly 包。各后端自己的布局见 [python-sdk/Package](python-sdk/Package.zh.md) 和 [wasm/Package](wasm/Package.zh.md)。
 
-状态：Python 后端通过 [python-sdk/Package](python-sdk/Package.zh.md) 第 6 节规定的运行时命令行实现了本文。WebAssembly 后端仍是目标契约。加载器本身从不从归档安装插件：安装会写出加载器随后发现的解压后目录。
+状态：Python 后端通过 [python-sdk/Package](python-sdk/Package.zh.md) 第 6 节规定的运行时命令行实现了本文。WebAssembly 的包布局在 [wasm/Package](wasm/Package.zh.md) 中固定，但还没有安装器实现它。加载器本身从不从归档安装插件：安装会写出加载器随后发现的解压后目录。
 
-包是一个 zip 归档。它在归档根放一份插件清单，以及清单指定的文件。加载器会先解压归档再加载内容，所以归档只是传输格式，永远不是插件运行的目录。清单决定后端、入口点和平台目标，因此归档布局与清单不能互相矛盾。
+包是一个 zip 归档。它在归档根放一份插件清单，以及清单指定的文件。加载器会先解压归档再加载内容，所以归档只是传输格式，永远不是插件运行的目录。清单决定后端和入口点，因此归档布局与清单不能互相矛盾。
 
 ## 目录
 
@@ -26,7 +26,7 @@
 
 WebAssembly 包永远不是可执行程序。它不能以 shebang 行开头，根目录下不能有 `__main__.py`，加载器会拒绝这样的归档。Python 包可以是 `.pyz`（[python-sdk/Package](python-sdk/Package.zh.md) 第 2 节），但加载器仍然只解压它，从不执行它。
 
-文件名里出现的平台、编译器或版本信息只是参考。插件 id、版本、后端和平台目标的唯一权威是清单。
+文件名里出现的版本信息只是参考。插件 id、版本、后端和入口点的唯一权威是清单。
 
 ## 2. 归档根
 

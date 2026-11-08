@@ -4,9 +4,9 @@ English | [简体中文](Package.zh.md)
 
 This document specifies the archive that carries an installable dsh-mloader plugin and the installation, update and removal rules that every package shares. It applies to Python packages and to WebAssembly packages. The backend-specific layout is in [python-sdk/Package](python-sdk/Package.md) and [wasm/Package](wasm/Package.md).
 
-Status: the Python backend implements this document through the runtime command line specified in [python-sdk/Package](python-sdk/Package.md) section 6. The WebAssembly backend remains a target contract. The loader itself never installs a plugin from an archive: installation writes the extracted directory that the loader discovers.
+Status: the Python backend implements this document through the runtime command line specified in [python-sdk/Package](python-sdk/Package.md) section 6. The WebAssembly package layout is fixed in [wasm/Package](wasm/Package.md), and no installer implements it yet. The loader itself never installs a plugin from an archive: installation writes the extracted directory that the loader discovers.
 
-A package is a zip archive. It holds one plugin manifest at the archive root and the files that manifest names. The loader extracts the archive before it loads anything, so the archive is a transport format and never the directory the plugin runs from. The manifest decides the backend, the entry point and the platform targets, which means the archive layout and the manifest cannot disagree.
+A package is a zip archive. It holds one plugin manifest at the archive root and the files that manifest names. The loader extracts the archive before it loads anything, so the archive is a transport format and never the directory the plugin runs from. The manifest decides the backend and the entry point, which means the archive layout and the manifest cannot disagree.
 
 ## Contents
 
@@ -26,7 +26,7 @@ The conventional suffixes are `.mloader.pack` and `.zip`. The loader identifies 
 
 A WebAssembly package is never an executable application. It must not begin with a shebang line and must not contain a `__main__.py` at its root, and the loader rejects an archive that does. A Python package may be a `.pyz` ([python-sdk/Package](python-sdk/Package.md) section 2), but the loader still only extracts it and never executes it.
 
-A file name that names a platform, a compiler or a version is informative only. The manifest is the only authority for the plugin id, the version, the backend and the platform targets.
+A file name that names a version is informative only. The manifest is the only authority for the plugin id, the version, the backend and the entry point.
 
 ## 2. Archive root
 

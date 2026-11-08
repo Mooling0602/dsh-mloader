@@ -201,6 +201,6 @@ python3 "$CLI" install ./my-plugin.mloader.pack --profile "$PROFILE"
 - **Python 3.10 或更高版本。** 插件在由 `pythonBin` 创建的共享环境中运行，归档只携带打包者放进去的文件。
 - **没有 Python 版本选择。** 环境继承 `pythonBin` 指定的解释器；`requires-python` 声明会被忽略并报告警告。
 - **一个共享环境。** 同一个 profile 的所有 Python 插件共用一个环境。需要隔离依赖集合的插件不受支持。
-- **没有平台目标。** `targets` 是 WebAssembly 包字段；Python 清单不能设置它。Python 代码不会按操作系统或 CPU 架构由包格式选择。
+- **没有平台选择。** 包格式不会按操作系统或 CPU 架构选择产物。Python 插件从清单 `entry` 指定的文件启动。
 - **原生扩展是插件的责任。** 扩展模块只有在匹配解释器 ABI 和平台时才能导入。包格式不校验这一点，所以需要它的插件要在文档里声明要求。
 - **安装时不执行归档。** `.pyz` 在用户运行时可以是可执行的，但安装器只解压它，从不执行归档。

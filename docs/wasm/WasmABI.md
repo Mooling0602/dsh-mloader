@@ -34,7 +34,7 @@ A WASI reactor module also exports `_initialize`, which the worker calls before 
 
 A source-only Rust example that implements these exports lives in `seeds/wasm-mloader/` of the dsh-mloader repository. It is not installed by the loader; build it before use.
 
-The manifest `entry` field names the `.wasm` file, resolved against the manifest directory. Selection through `targets` is a package format target contract and is not implemented; [Package](Package.md) section 1 specifies the field. The worker reads that file, compiles it and instantiates it.
+The manifest `entry` field names the `.wasm` file, resolved against the manifest directory. [Package](Package.md) section 1 specifies the package layout. The worker reads that file, compiles it and instantiates it.
 
 ## 2. Request and result contract
 
