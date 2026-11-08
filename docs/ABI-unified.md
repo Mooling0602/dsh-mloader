@@ -241,6 +241,10 @@ The loader registers the node through the optional dsh commands service:
 
 A command handler receives the text after the registered command name, including the separator whitespace. It returns either a string, which becomes `{"kind": "success", "text": "..."}`, or an object with `kind` (`success` or `error`) and `text`. An error result is rendered by the dispatching UI. A thrown handler error or a command deadline is converted into an error result for that invocation.
 
+The dsh chat card renders a command result on one summary row, truncated to that row, and it adds an expandable body only when the text contains a line break. A handler that produces report-like output returns multi-line text, as the bundled example does; a single-line result stays a one-row status message.
+
+A tool and a command are independent registrations. The loader registers exactly what a plugin declares and never derives one surface from the other, so a plugin decides per capability whether the user, the model or both reach it. The bundled example exposes the same addition as the `hello_add` tool and the `/hello-add` command.
+
 Command execution does not pass through the model and adds no authority: the handler runs with the same access the plugin already has. The backend receives `command.call` with the payload `{"command": <node id>, "input": <raw text>}` and answers with the result object.
 
 ## 4. RPC protocol

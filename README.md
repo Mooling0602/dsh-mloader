@@ -43,7 +43,7 @@ After the restart the loader prints one `[mloader]` line per lifecycle event in 
 [mloader] ready: 1 plugin(s) mounted
 ```
 
-Ask the model to call `hello_mloader` or `hello_add`, or type `/hello-mloader Ada` to run the example command. `/mloader` lists the hosted plugins. The example is maintained by the loader: every start replaces the installed copy, and the id `hello-mloader` is reserved for it.
+Ask the model to call `hello_mloader` or `hello_add`, or type `/hello-mloader Ada` or `/hello-add 2 40` to run the example commands. `/mloader` lists the hosted plugins. The example is maintained by the loader: every start replaces the installed copy, and the id `hello-mloader` is reserved for it.
 
 ## Where plugins go
 
@@ -84,7 +84,7 @@ Two surfaces read the same snapshot:
 
 `/mloader` lists every plugin, `/mloader <plugin-id>` shows one, and `/mloader load <plugin-id>`, `/mloader unload <plugin-id>` and `/mloader reload <plugin-id>` change one at runtime. Loading only works for a plugin that is already installed under the profile.
 
-A hosted plugin can also register slash commands of its own. The bundled example registers `/hello-mloader`. Plugin commands share one global namespace with dsh and the other plugins: a plugin declares candidate names in priority order, and the loader registers the first name that is not taken. When every candidate is taken, the existing command wins and the plugin keeps loading without that command.
+A hosted plugin can also register slash commands of its own. The bundled example registers `/hello-mloader` and `/hello-add`, the command form of its `hello_add` tool. Tools and commands are separate registrations: a plugin decides which surface its users need, and the loader never mirrors one into the other. Plugin commands share one global namespace with dsh and the other plugins: a plugin declares candidate names in priority order, and the loader registers the first name that is not taken. When every candidate is taken, the existing command wins and the plugin keeps loading without that command.
 
 In a web profile, the dsh-mloader bundle detail page on the dsh Plugins page has an External plugins section with one switch per hosted plugin. A switch takes effect immediately and lasts for the running dsh only: it never edits the plugin directory, and every plugin returns to the state its manifest declares after a restart. A plugin must already be installed under the profile plugin directory to appear there; the switch does not install anything.
 

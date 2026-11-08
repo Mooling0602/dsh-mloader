@@ -63,7 +63,7 @@ The `apply` reply declares the plugin's capabilities in its `result` object:
 {"ok": true, "result": {"tools": [], "events": [], "commands": []}}
 ```
 
-- Each entry in `tools` is a tool object as specified in [ABI-unified](../ABI-unified.md) section 3.2. Each name in `events` must be in the whitelist of section 3.3. Each entry in `commands` is a command node as specified in section 3.6.
+- Each entry in `tools` is a tool object as specified in [ABI-unified](../ABI-unified.md) section 3.2. Each name in `events` must be in the whitelist of section 3.3. Each entry in `commands` is a command node as specified in section 3.6. The rendering rule for the text a command returns is in section 3.6 as well.
 - The loader performs the real registrations on its own context and records them in the plugin's ledger.
 - A declaration the loader rejects fails the apply handshake, and the plugin is marked `failed`. A command node that the retreat rule skips does not fail the handshake; the other declarations stay registered.
 - The backend has no inbound request channel. A module cannot send `tools.register`, `commands.register`, `events.on`, `logger.log` or `effect.register`, and the core ABI provides no way for it to initiate a message.

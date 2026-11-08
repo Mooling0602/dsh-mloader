@@ -11,7 +11,7 @@
  *   5. The reserved id is rejected without the built-in marker.
  *   6. `seedExamples: false` does not touch the disk.
  *   7. An unwritable target does not break the loader (warning only).
- *   8. End to end: release, discovery, apply and a callable tool.
+ *   8. End to end: release, discovery, apply, a callable tool and the pair of example commands.
  *   9. The released example is a valid plugin (manifest and tool schema).
  */
 
@@ -20,6 +20,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, chmod } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { apply as loaderApply } from '../src/index.js'
 import { installSeedExamples, SEED_DIR } from '../src/seed.js'
@@ -206,13 +207,14 @@ async function main() {
     check('no exception was thrown', threw === false)
     await chmod(readOnlyBase, 0o700)
 
-    section('7. End to end: release, discover, apply and call tools')
+    section('7. End to end: release, discover, apply, call tools and run the commands')
     const profileD = join(tempRoot, 'profile-d')
     const root = new Context()
     const loggerD = makeLogger()
     root.provide('logger', loggerD)
     root.provide('systemPrompt', systemPromptStub())
     root.plugin(ToolRuntime, {})
+    root.plugin(CommandRuntime, {})
     await new Promise((resolve) => setTimeout(resolve, 200))
 
     // Only a profile directory is given: discovery and seeding are automatic.
@@ -236,6 +238,43 @@ async function main() {
     const greet = await tools.get('hello_mloader').execute({ who: 'mloader', excited: true })
     check('hello_mloader returns the greeting', greet?.message === 'Hello, mloader!', JSON.stringify(greet))
     check('the result carries the plugin name', greet?.plugin === 'hello-mloader', JSON.stringify(greet))
+
+    const commands = root.get('commands')
+    const commandAgent = { id: 'seed-command', session: { append() {} } }
+    check(
+      'the example registers /hello-mloader with its input hint',
+      commands?.find(commandAgent, 'hello-mloader')?.input?.hint === 'who',
+      JSON.stringify(commands?.find(commandAgent, 'hello-mloader')),
+    )
+    const commandRun = await commands.execute(commandAgent, '/hello-mloader Ada', [], new AbortController().signal)
+    check('the example command succeeds', commandRun?.result?.kind === 'success', JSON.stringify(commandRun))
+    const commandText = commandRun?.result?.text ?? ''
+    check(
+      'the example command returns multi-line text so the chat card can expand it',
+      commandText.split('\n').length >= 2,
+      JSON.stringify(commandRun?.result),
+    )
+    check('the example command greets its input', commandText.includes('Hello, Ada!'), JSON.stringify(commandRun?.result))
+
+    check(
+      'the example exposes hello_add as /hello-add',
+      commands?.find(commandAgent, 'hello-add')?.input?.hint === 'a b',
+      JSON.stringify(commands?.find(commandAgent, 'hello-add')),
+    )
+    const addRun = await commands.execute(commandAgent, '/hello-add 2 40', [], new AbortController().signal)
+    const addText = addRun?.result?.text ?? ''
+    check('the addition command succeeds', addRun?.result?.kind === 'success', JSON.stringify(addRun))
+    check(
+      'the addition command computes the sum and returns multi-line text',
+      addText.includes('= 42') && addText.split('\n').length >= 2,
+      JSON.stringify(addRun?.result),
+    )
+    const badAddRun = await commands.execute(commandAgent, '/hello-add nope', [], new AbortController().signal)
+    check(
+      'the addition command reports a usage error',
+      badAddRun?.result?.kind === 'error' && (badAddRun?.result?.text ?? '').startsWith('Usage:'),
+      JSON.stringify(badAddRun?.result),
+    )
 
     const sum = await tools.get('hello_add').execute({ a: 2, b: 40 })
     check('hello_add sums correctly', sum?.sum === 42, JSON.stringify(sum))

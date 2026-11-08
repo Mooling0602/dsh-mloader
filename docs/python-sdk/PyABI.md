@@ -164,7 +164,7 @@ Both styles may be mixed in one plugin. Declared tools are registered first, the
 
 A tool handler is called with one argument, the object the model supplied. It must return a JSON serialisable value; the declared `output` schema or the inferred one validates it. An event handler follows the arity rule in [ABI-unified](../ABI-unified.md) section 3.3: zero parameters calls it with no argument, one parameter passes the first projected argument, and more than one passes every projected argument.
 
-A command handler is called with one argument, the raw text after the registered command name. It may return a string, which becomes a successful text result, or a dict with `kind` (`success` or `error`) and `text`. A raised exception becomes an error result for that invocation and does not stop the process.
+A command handler is called with one argument, the raw text after the registered command name. It may return a string, which becomes a successful text result, or a dict with `kind` (`success` or `error`) and `text`. A raised exception becomes an error result for that invocation and does not stop the process. The rendering rule for the result text, including when the dsh chat card offers an expanded body, is in [ABI-unified](../ABI-unified.md) section 3.6.
 
 ## 4. Result schema inference
 

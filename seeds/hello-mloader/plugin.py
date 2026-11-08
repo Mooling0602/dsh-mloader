@@ -17,7 +17,7 @@ The directory holds three files:
 The plugin demonstrates four capabilities of the runtime:
 
 1. Registering tools with ``ctx.tools.register``.
-2. Registering a slash command with ``ctx.commands.register``.
+2. Registering slash commands with ``ctx.commands.register``, including one that exposes a tool to the user.
 3. Subscribing to host events with ``ctx.on``.
 4. Registering cleanup work with ``ctx.effect.register``.
 
@@ -125,13 +125,58 @@ def apply(ctx: Context):
         plugin already took this name, the loader keeps the existing command
         and skips this one.
 
+        The text is multi-line on purpose. The dsh chat card draws a command
+        result on one summary row, and it adds an expandable body only when
+        the text contains a line break.
+
         :param input: Text after the command name.
         :type input: str
-        :returns: A successful command result.
+        :returns: A successful command result with multi-line text.
         :rtype: dict
         """
         who = input.strip() or "world"
-        return {"kind": "success", "text": f"Hello, {who}!"}
+        return {
+            "kind": "success",
+            "text": "\n".join([
+                f"Hello, {who}!",
+                f"plugin: {NAME} (python, bundled example)",
+                "Use /mloader hello-mloader to inspect this plugin's registrations.",
+            ]),
+        }
+
+    @ctx.commands.register(
+        names="hello-add",
+        description="Add two numbers from the slash command line.",
+        input_hint="a b",
+    )
+    def hello_add_command(input):
+        """Add the two numbers given after the command name.
+
+        The command exposes the same arithmetic as the ``hello_add`` tool, so
+        the user and the model reach one capability through both surfaces.
+        That pairing is a choice: a plugin registers the surfaces its users
+        need, and the loader never derives one from the other.
+
+        :param input: Two whitespace separated numbers.
+        :type input: str
+        :returns: A successful command result with the addends and the sum,
+            or an error result carrying the usage line.
+        :rtype: dict
+        """
+        parts = input.split()
+        if len(parts) != 2:
+            return {"kind": "error", "text": "Usage: /hello-add <a> <b>"}
+        try:
+            a, b = (float(part) for part in parts)
+        except ValueError:
+            return {"kind": "error", "text": "Usage: /hello-add <a> <b>"}
+        return {
+            "kind": "success",
+            "text": "\n".join([
+                f"{a:g} + {b:g} = {a + b:g}",
+                "This command runs the same arithmetic as the hello_add tool.",
+            ]),
+        }
 
     @ctx.on("tools/execute")
     def on_tool_execute(payload):

@@ -63,7 +63,7 @@ WASI reactor 模块还会导出 `_initialize`，worker 会在版本检查之前�
 {"ok": true, "result": {"tools": [], "events": [], "commands": []}}
 ```
 
-- `tools` 的每一项是 [ABI-unified](../ABI-unified.zh.md) 第 3.2 节规定的工具对象。`events` 的每个名字必须在第 3.3 节的白名单里。`commands` 的每一项是第 3.6 节规定的命令节点。
+- `tools` 的每一项是 [ABI-unified](../ABI-unified.zh.md) 第 3.2 节规定的工具对象。`events` 的每个名字必须在第 3.3 节的白名单里。`commands` 的每一项是第 3.6 节规定的命令节点。 命令返回文本的渲染规则也在第 3.6 节。
 - 加载器在自己的上下文上执行真正的注册，并记录到插件的账本。
 - 加载器拒绝的声明会让 apply 握手失败，插件被标记为 `failed`。被退避规则跳过的命令节点不会让握手失败；其余声明照常注册。
 - 后端没有入站请求通道。模块不能发送 `tools.register`、`commands.register`、`events.on`、`logger.log` 或 `effect.register`，核心 ABI 也没有提供让它主动发起消息的途径。
