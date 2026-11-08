@@ -257,7 +257,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `integration.mjs` | Python end to end on a real Cordis context and a real tool runtime | no |
 | `edge-cases.mjs` | schema pre-validation, event whitelist, crash isolation, unload cleanup | no |
 | `dual-backend.mjs` | Python and WebAssembly plugins in one loader, using the built `seeds/wasm-mloader` example | yes, otherwise skips |
-| `wasm-safety.mjs` | a looping WebAssembly plugin does not block the host thread, times out into a failed record with its registrations revoked, and can be reloaded or re-enabled | yes, otherwise skips |
+| `wasm-safety.mjs` | the default-on backend and its explicit opt-out, a looping WebAssembly plugin that does not block the host thread and times out into a failed record with its registrations revoked, and its reload and re-enable | yes, otherwise skips |
 | `wasm-failure.mjs` | backend level failure convergence: a deadline fails every pending call, a worker exit and error are reported once, an intentional stop stays silent, and a worker death during apply fails the apply | yes, otherwise skips |
 | `wasm-abi.mjs` | in-memory modules: ABI version 1 is accepted, a mismatched version and a missing version export are rejected | no |
 | `wasm-reactor.mjs` | in-memory WASI reactor: `_initialize` runs before the version check, and the version check still rejects a mismatched version after initialization | no |
@@ -338,7 +338,7 @@ The defaults are defined in `src/index.ts` and repeated in `cordis.patch.yml`. A
 | `seedExamples` | `true` | Release and refresh the bundled complete Python example in the profile plugin directory on every start. Source-only examples are not released. |
 | `console` | `true` | Terminal output: `true` for lifecycle events, `'verbose'` for scan detail, `false` for silence. |
 | `watch` | `true` | Mount a plugin directory installed while the loader runs and unmount one that is deleted. `false` installs no watcher, so a new plugin needs a restart. |
-| `wasm.enabled` | `false` | Enable the WebAssembly backend. It is off by default. |
+| `wasm.enabled` | `true` | Enable the WebAssembly backend. It is on by default; `false` keeps WebAssembly plugins `disabled`. |
 
 `command` and `statusTool` are independent switches. The command also needs the optional `commands` service; when that service is absent the loader skips the command and keeps mounting plugins.
 
@@ -464,7 +464,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **The worker has a JavaScript heap limit, not a WebAssembly memory limit.** `resourceLimits.maxOldGenerationSizeMb` caps the worker's V8 old generation at 256 MB. WebAssembly linear memory is external memory and is not capped by the loader, and the module runs in the same process as dsh, so only trusted plugins should run.
 - **The worker cannot call back into the host synchronously**, because a host import cannot return across threads. The v1 protocol is declaration based, so this costs no capability.
 - **Arguments to a worker are projected too.** `postMessage` uses structured clone, which throws on host objects such as `AbortSignal`; the same projection as the Python backend applies.
-- **The WebAssembly backend is opt-in.** It loads only when `wasm.enabled` is `true`, because failure injection coverage on that path is incomplete.
+- **The WebAssembly backend is enabled by default.** An operator turns it off with `wasm.enabled: false`, and a WebAssembly plugin then stays `disabled` with that configuration named on its record. The worker runs in the dsh process and its linear memory is not capped, so only trusted modules should run.
 
 ### 5.8 Discovery and registration
 
@@ -520,7 +520,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **The plugin HTTP routes are fixed and guarded.** `GET /mloader/plugins` returns `{"plugins": snapshot[]}`. `POST /mloader/plugins/toggle` takes `{"id": string, "enabled": boolean}` and returns `{"plugin": snapshot}`. Both answer with content type `application/json; charset=utf-8`. Error statuses:
   - `400` for a malformed or incomplete body,
   - `404` for an unknown plugin id,
-  - `409` when enabling a WebAssembly plugin while `wasm.enabled` is not `true`,
+  - `409` when enabling a WebAssembly plugin while `wasm.enabled` is `false`,
   - `413` for a body above 64 KiB,
   - `405` for a wrong method,
   - `500` with `error` and the current `plugin` snapshot when the start fails; the record stays `failed`.
@@ -547,7 +547,7 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **Standard streams are not plugin output channels.** The runtime detaches them before plugin code runs, so `print`, `stderr` and the logging module are discarded. Use `ctx.logger`. A write that still reaches `stdout` is a protocol violation, not log output.
 - **Tool results must be JSON serializable.** A raised exception becomes a tool error and leaves the process alive. A result the projection cannot represent is rejected at the call, again without killing the child.
 - **A Python plugin shares the profile environment.** Declare PyPI dependencies in `pyproject.toml` under `[project].dependencies`; `requirements.txt` is the older form and uses pip. A plugin cannot request a Python version or an isolated environment.
-- **A WebAssembly plugin exports the six core exports** (`memory` plus the five functions) and must not depend on host imports beyond what `docs/wasm/WasmABI.md` section 1 declares. A WASI reactor additionally exports `_initialize`. The WebAssembly backend stays off unless `wasm.enabled` is turned on.
+- **A WebAssembly plugin exports the six core exports** (`memory` plus the five functions) and must not depend on host imports beyond what `docs/wasm/WasmABI.md` section 1 declares. A WASI reactor additionally exports `_initialize`. The WebAssembly backend stays off only when `wasm.enabled` is `false`.
 - **Operator surfaces are not plugin capabilities.** The Plugins-page controls, the HTTP routes and the `/mloader` command belong to dsh-mloader; an external plugin cannot call or rely on them. They may also change without notice, because they are not part of the ABI.
 - **Plugins are independent works.** The loader license does not apply to them, and the loader places no requirement on how a plugin is licensed.
 

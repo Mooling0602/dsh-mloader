@@ -93,7 +93,7 @@ WASI 不属于受支持的契约。
 - 后端在执行声明的注册之后会检查 worker 是否仍然存活。worker 在 apply 握手期间退出会让 apply 失败，所以插件不会在 worker 已死的情况下被记录为 `applied`。
 - worker 不能同步回调宿主，因为宿主导入无法跨线程返回。v1 基于声明，所以这不损失能力。
 - 传给 worker 的参数会被投影成纯数据，因为 `postMessage` 使用结构化克隆，遇到 `AbortSignal` 这类宿主对象会抛错。[ABI-unified](../ABI-unified.zh.md) 第 3.4 节的投影适用。
-- 后端默认关闭。必须在 WebAssembly 插件启动前把加载器选项 `wasm.enabled` 设为 `true`；操作者参考见 [CONTEXT](../../CONTEXT.md)。
+- 后端默认启用。加载器选项 `wasm.enabled` 设为 `false` 后，WebAssembly 插件不会启动；操作者参考见 [CONTEXT](../../CONTEXT.md)。
 
 ## 6. 后端不支持的内容
 

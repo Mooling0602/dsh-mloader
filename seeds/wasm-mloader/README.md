@@ -2,7 +2,7 @@
 
 A source-only Rust WebAssembly example plugin for dsh-mloader.
 
-The loader does not install this directory. The package intentionally does not contain a compiled `.wasm` artifact, and the WebAssembly backend is disabled by default. Build the example, then copy the generated directory into the profile plugin root and enable the backend.
+The loader does not install this directory. The package intentionally does not contain a compiled `.wasm` artifact. Build the example, then copy the generated directory into the profile plugin root.
 
 ## Requirements
 
@@ -21,7 +21,7 @@ The output is written to `dist/wasm-mloader/` and contains `mloader.plugin.json`
 
 ## Install
 
-Enable the backend in the profile configuration, then copy the generated directory into the profile plugin root:
+Copy the generated directory into the profile plugin root:
 
 ```sh
 mkdir -p ~/.dsh/profiles/web/mloader/plugins

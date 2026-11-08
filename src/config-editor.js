@@ -25,7 +25,7 @@ export class ConfigValidationError extends Error {
 const DEFAULTS = {
     roots: [], profilePlugins: true, autoEnable: true, pythonBin: 'python3', shellPath: [],
     enablePyc: false, statusTool: true, command: true, seedExamples: true, console: true,
-    watch: true, wasmEnabled: false,
+    watch: true, wasmEnabled: true,
 };
 /** Return true when the value is a non-array record. */
 function isRecord(value) {

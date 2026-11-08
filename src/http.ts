@@ -40,7 +40,7 @@ export const MAX_BODY_BYTES = 64 * 1024
  */
 export class WasmDisabledError extends Error {
   constructor() {
-    super('wasm backend is disabled (set config.wasm.enabled = true to opt in)')
+    super('wasm backend is disabled (config.wasm.enabled is false)')
     this.name = 'WasmDisabledError'
   }
 }

@@ -53,7 +53,7 @@ dsh plugin --profile web remove dsh-mloader
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
-插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见 [CONTEXT](CONTEXT.md)。监听默认开启，关掉的方法见[配置](#配置)，关掉之后新增插件需要重启 dsh。
+插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认启用；把 `wasm.enabled` 设为 `false` 可以阻止 WebAssembly 插件加载。监听默认开启，关掉的方法见[配置](#配置)，关掉之后新增插件需要重启 dsh。
 
 加载器也可以替你安装插件包。dsh 运行期间，`/mloader install ./plugin.mloader.pack` 接受一个或多个归档，把每个包装进 `<profile>/mloader/plugins`，再由加载器挂载。命令从清单识别后端：WebAssembly 包由加载器自己安装，Python 包交给 Python SDK 命令行。命令拒绝示例的保留 id，并在插件已加载时自动重新加载。如果归档已经安装过，或安装后的文件被改过，命令会请求二次确认：运行 `/mloader ok`、`/mloader confirm`，或再次执行同一命令。
 
@@ -73,7 +73,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 
 ## WebAssembly 示例
 
-仓库在 `seeds/` 下提供两个示例。`hello-mloader` 是完整的 Python 示例，profile 会自动收到它。`wasm-mloader` 是只含源码的 Rust 示例，加载器不会释放它，仓库也不提交编译后的 `.wasm`。用 `./seeds/wasm-mloader/build.sh` 构建，然后把生成的 `dist/wasm-mloader` 目录复制到 profile 插件根目录，或者把这个目录打成 zip 并用 `/mloader install` 安装，并启用 `wasm.enabled`。构建要求和示例契约见 [seeds/wasm-mloader](seeds/wasm-mloader/README.md)。
+仓库在 `seeds/` 下提供两个示例。`hello-mloader` 是完整的 Python 示例，profile 会自动收到它。`wasm-mloader` 是只含源码的 Rust 示例，加载器不会释放它，仓库也不提交编译后的 `.wasm`。用 `./seeds/wasm-mloader/build.sh` 构建，然后把生成的 `dist/wasm-mloader` 目录复制到 profile 插件根目录，或者把这个目录打成 zip 并用 `/mloader install` 安装。构建要求和示例契约见 [seeds/wasm-mloader](seeds/wasm-mloader/README.md)。
 
 ## 查看与切换插件
 
@@ -118,7 +118,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | `seedExamples` | `true` | 每次启动时是否把随包的完整 Python 示例释放并刷新到 profile 里。只含源码的示例不会被释放。 |
 | `console` | `true` | 终端输出：`true` 只打印生命周期行，`'verbose'` 连扫描细节一起打印，`false` 静默。 |
 | `watch` | `true` | dsh 运行期间新增或删除的插件目录是否免重启自动挂载和卸载。 |
-| `wasm.enabled` | `false` | 是否启用 WebAssembly 后端。 |
+| `wasm.enabled` | `true` | 是否启用 WebAssembly 后端。默认启用，设为 `false` 时 WebAssembly 插件保持禁用。 |
 
 每项取值的格式、字节码缓存的取舍和重启验收清单见 [CONTEXT](CONTEXT.md)。
 

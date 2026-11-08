@@ -61,6 +61,12 @@ test('read and save preserve unedited fields and reject stale or invalid edits',
   await assert.rejects(writeLoaderConfig(ctx, current.revision, { watch: false }), /unavailable/)
 })
 
+test('the WebAssembly backend is enabled by default', () => {
+  const entry = { options: { id: 'dsh-mloader', name: 'dsh-mloader', config: { watch: true } } }
+  const ctx = { get: () => ({ entries: () => [entry], edit: async () => undefined }) }
+  assert.equal(readLoaderConfig(ctx).config.wasmEnabled, true)
+})
+
 test('configuration editing refuses ambiguous or unrelated profile entries', async () => {
   const { ctx, entry, editor } = fixture()
   const snapshot = readLoaderConfig(ctx)

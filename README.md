@@ -53,7 +53,7 @@ Each plugin lives in its own directory under the profile:
 ~/.dsh/profiles/<profile>/mloader/plugins/<plugin-id>/
 ```
 
-A plugin directory contains a `mloader.plugin.json` manifest and its entry file. Copy the directory in while dsh runs: the loader watches the plugin roots, so a directory that appears is mounted and one that is deleted is unmounted, both without a restart. After editing the files of an installed plugin, run `/mloader reload <plugin-id>`. The loader finds the current profile through dsh, so no path configuration is needed. Python plugins need Python 3.10 or later. The WASM backend is disabled by default; see [CONTEXT](CONTEXT.md) to enable it. Watching is on by default; see [Configuration](#configuration) to turn it off, and a plugin added to the directory then needs a restart.
+A plugin directory contains a `mloader.plugin.json` manifest and its entry file. Copy the directory in while dsh runs: the loader watches the plugin roots, so a directory that appears is mounted and one that is deleted is unmounted, both without a restart. After editing the files of an installed plugin, run `/mloader reload <plugin-id>`. The loader finds the current profile through dsh, so no path configuration is needed. Python plugins need Python 3.10 or later. The WASM backend is enabled by default; set `wasm.enabled` to `false` to keep WebAssembly plugins from loading. Watching is on by default; see [Configuration](#configuration) to turn it off, and a plugin added to the directory then needs a restart.
 
 The loader can also install a package archive for you. While dsh runs, `/mloader install ./plugin.mloader.pack` accepts one or more archives, installs each into `<profile>/mloader/plugins` and lets the loader mount the result. The command detects the backend from the manifest: a WebAssembly package is installed by the loader itself, and a Python package is handed to the Python SDK command line. It refuses the reserved example id and reloads a plugin that was already loaded. If the archive is already installed or its installed files were edited, the command asks for a second confirmation: run `/mloader ok`, `/mloader confirm`, or run the same command again.
 
@@ -73,7 +73,7 @@ The command derives the profile from the environment path. [Python package](docs
 
 ## WebAssembly example
 
-The repository ships two examples under `seeds/`. `hello-mloader` is the complete Python example that a profile receives automatically. `wasm-mloader` is a source-only Rust example; the loader never releases it, and no compiled `.wasm` file is committed. Build it with `./seeds/wasm-mloader/build.sh`, then copy the generated `dist/wasm-mloader` directory into the profile plugin root, or zip that directory and install the archive with `/mloader install`, and enable `wasm.enabled`. The build requirements and the example contract are in [seeds/wasm-mloader](seeds/wasm-mloader/README.md).
+The repository ships two examples under `seeds/`. `hello-mloader` is the complete Python example that a profile receives automatically. `wasm-mloader` is a source-only Rust example; the loader never releases it, and no compiled `.wasm` file is committed. Build it with `./seeds/wasm-mloader/build.sh`, then copy the generated `dist/wasm-mloader` directory into the profile plugin root, or zip that directory and install the archive with `/mloader install`. The build requirements and the example contract are in [seeds/wasm-mloader](seeds/wasm-mloader/README.md).
 
 ## Inspect and switch plugins
 
@@ -118,7 +118,7 @@ Every key is optional. The default column is what dsh-mloader uses when you leav
 | `seedExamples` | `true` | Whether the bundled complete Python example is released and refreshed in the profile on every start. Source-only examples are never released. |
 | `console` | `true` | Terminal output: `true` for lifecycle lines, `'verbose'` for scan detail as well, `false` for silence. |
 | `watch` | `true` | Whether plugin directories added or removed while dsh runs are mounted or unmounted without a restart. |
-| `wasm.enabled` | `false` | Whether the WebAssembly backend is enabled. |
+| `wasm.enabled` | `true` | Whether the WebAssembly backend is enabled. It is on by default; `false` keeps WebAssembly plugins disabled. |
 
 The shape of each value, the bytecode cache trade-off and the restart checklist are in [CONTEXT](CONTEXT.md).
 

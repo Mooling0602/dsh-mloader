@@ -90,7 +90,7 @@ interface LoaderConfig {
   console?: boolean | 'verbose'
   /** Mount and unmount plugin directories that appear or disappear while the loader runs. Defaults to true. */
   watch?: boolean
-  /** WebAssembly backend switch. Disabled by default. */
+  /** WebAssembly backend switch. Enabled by default; `false` disables it. */
   wasm?: { enabled?: boolean }
 }
 
@@ -119,7 +119,7 @@ const DEFAULTS = {
   seedExamples: true,
   console: true as boolean | 'verbose',
   watch: true,
-  wasm: { enabled: false },
+  wasm: { enabled: true },
 }
 
 /** Delay before a plugin that failed right after it appeared is started again. */
@@ -222,7 +222,7 @@ export class PluginManager {
    * Boot and the root watcher share this path, so a plugin installed while the
    * loader runs is admitted by the same rules as one present at boot: a disabled
    * manifest stays `disabled`, `autoEnable: false` leaves it `discovered`, and the
-   * WebAssembly opt-in is honoured. A failed start is reported and does not throw.
+   * WebAssembly configuration is honoured. A failed start is reported and does not throw.
    *
    * @param spec - Normalised plugin specification from discovery.
    * @param retry - True when a failed start should be retried. A directory caught
@@ -243,10 +243,11 @@ export class PluginManager {
       record.state = PLUGIN_STATE.DISCOVERED
       return
     }
-    // The WebAssembly path is opt-in until its failure injection coverage is complete.
-    if (spec.backend === 'wasm' && this.config.wasm?.enabled !== true) {
+    // The backend is enabled unless the configuration switches it off; a
+    // disabled backend starts no worker at all.
+    if (spec.backend === 'wasm' && this.config.wasm?.enabled === false) {
       record.state = PLUGIN_STATE.DISABLED
-      record.error = 'wasm backend disabled (set config.wasm.enabled = true to opt in)'
+      record.error = 'wasm backend is disabled (config.wasm.enabled is false)'
       this.logger?.warn?.(`[${spec.id}] skipped: ${record.error}`)
       this.out.lifecycle(`skipped ${spec.id} (wasm backend is disabled)`)
       return
@@ -651,7 +652,7 @@ export class PluginManager {
    * @param id - Plugin id.
    * @returns The snapshot after the plugin is applied.
    * @throws {Error} When no plugin with the id is tracked, when the plugin uses
-   *   a WebAssembly backend that the config has not enabled, or when startup
+   *   a WebAssembly backend that the configuration has disabled, or when startup
    *   fails.
    */
   async enable(id: string): Promise<PluginSnapshot> {
@@ -660,7 +661,7 @@ export class PluginManager {
     // An applied or starting plugin already owns a backend instance; starting a
     // second backend for the same id would orphan the first one.
     if (record.state === PLUGIN_STATE.APPLIED || record.instance !== null) return record.snapshot()
-    if (record.spec.backend === 'wasm' && this.config.wasm?.enabled !== true) {
+    if (record.spec.backend === 'wasm' && this.config.wasm?.enabled === false) {
       throw new WasmDisabledError()
     }
 

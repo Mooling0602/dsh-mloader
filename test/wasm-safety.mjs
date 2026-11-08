@@ -2,11 +2,11 @@
  * WebAssembly safety: an infinite loop inside a plugin must not block the host
  * main thread.
  *
- * The assertions are: WebAssembly is off by default, an explicit enable mounts
- * the plugin, a looping call times out and terminates the worker while a
- * heartbeat keeps ticking, the plugin can be reloaded after the timeout, the
- * Python plugin in the same loader keeps working, and unload leaves no
- * registrations behind.
+ * The assertions are: an explicit opt-out keeps the backend disabled, the
+ * backend mounts a plugin by default, a looping call times out and terminates
+ * the worker while a heartbeat keeps ticking, the plugin can be reloaded after
+ * the timeout, the Python plugin in the same loader keeps working, and unload
+ * leaves no registrations behind.
  *
  * A compiled `.wasm` binary is required. The binaries are not committed, so the
  * suite skips cleanly when the fixture is absent; a skip leaves the property
@@ -84,27 +84,35 @@ async function main() {
   await sleep(200)
   const tools = root.get('tools')
 
-  section('1. WebAssembly is disabled by default')
+  section('1. An explicit opt-out keeps the backend disabled')
   const fixtures = new URL('./fixtures', import.meta.url).pathname
   const offFiber = root.plugin(
     { name: 'dsh-mloader', inject: ['tools'], apply: loaderApply },
-    { roots: [fixtures], pythonBin: 'python3', profilePlugins: false, seedExamples: false, console: false },
+    {
+      roots: [fixtures], pythonBin: 'python3', wasm: { enabled: false },
+      profilePlugins: false, seedExamples: false, console: false,
+    },
   )
-  await waitFor('fixtures settle with wasm disabled', () => {
+  await waitFor('fixtures settle with the backend opted out', () => {
     const entries = root.get('mloader')?.list() ?? []
     return entries.length === 4 && entries.every((entry) => entry.state !== 'loaded' && entry.state !== 'discovered')
   })
   const offLoader = root.get('mloader')
   const wasmOff = offLoader.list().find((entry) => entry.id === 'wasm-loop')
-  check('wasm is not loaded by default', wasmOff?.state === 'disabled', `state=${wasmOff?.state} error=${wasmOff?.error}`)
+  check('wasm stays disabled when the configuration opts out', wasmOff?.state === 'disabled', `state=${wasmOff?.state} error=${wasmOff?.error}`)
+  check(
+    'the opt-out is named on the record',
+    /config\.wasm\.enabled is false/.test(wasmOff?.error ?? ''),
+    wasmOff?.error,
+  )
   check('wasm_loop_forever is not registered', tools.get('wasm_loop_forever') === undefined)
   await offFiber.dispose()
   await sleep(600)
 
-  section('2. An explicit enable mounts the plugin')
+  section('2. The backend mounts a plugin by default')
   const loaderFiber = root.plugin(
     { name: 'dsh-mloader', inject: ['tools'], apply: loaderApply },
-    { roots: [fixtures], pythonBin: 'python3', wasm: { enabled: true }, profilePlugins: false, seedExamples: false, console: false },
+    { roots: [fixtures], pythonBin: 'python3', profilePlugins: false, seedExamples: false, console: false },
   )
   await waitFor('wasm-loop mount', () => {
     const entries = root.get('mloader')?.list() ?? []
@@ -113,7 +121,8 @@ async function main() {
   })
   const loader = root.get('mloader')
   const wasmRecord = loader.list().find((entry) => entry.id === 'wasm-loop')
-  check('wasm-loop applied', wasmRecord?.state === 'applied', JSON.stringify(wasmRecord))
+  check('wasm-loop applied with the default configuration', wasmRecord?.state === 'applied', JSON.stringify(wasmRecord))
+  check('the default record carries no error', wasmRecord?.error === undefined, JSON.stringify(wasmRecord))
   check('normal wasm tool works', (await tools.get('wasm_fine').execute({}))?.fine === true)
 
   section('3. An infinite loop does not block the host main thread')

@@ -107,4 +107,4 @@ The command installs the archive as it is. It never compiles or inspects the mod
 - **No WASI preopens, no network and no environment.** The execution contract is in [WasmABI](WasmABI.md) section 4.
 - **No executable archive.** `.pyz` is a Python convention; a WebAssembly package is always data.
 - **No dependency contract.** The shared format carries no dependency declaration, and a WebAssembly package cannot add one ([Package](../Package.md) section 6).
-- **The WebAssembly backend is off by default.** The operator sets `wasm.enabled` to `true` before a WebAssembly plugin starts ([CONTEXT](../../CONTEXT.md)).
+- **The WebAssembly backend is on by default.** The operator sets `wasm.enabled` to `false` to keep a WebAssembly plugin from starting ([CONTEXT](../../CONTEXT.md)).

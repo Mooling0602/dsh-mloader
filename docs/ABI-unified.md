@@ -488,7 +488,7 @@ They are internal to dsh-mloader and are not part of the external plugin ABI. An
 5. It does not support a plugin UI or a client half.
 6. It does not allow a WebAssembly plugin to call back into the host synchronously.
 7. It does not expose any capability outside the §3 whitelist to external plugins. Command registration is the only human-facing surface, and §3.6 bounds it.
-8. It does not enable the WebAssembly backend by default. It ships a source-only WebAssembly example under `seeds/wasm-mloader/` that the loader never installs.
+8. It does not install the source-only WebAssembly example under `seeds/wasm-mloader/`; build it and install the directory or a package yourself.
 9. It does not restart a crashed plugin automatically.
 10. It does not watch the files inside an installed plugin. A changed manifest or entry file takes effect only after a reload or a restart.
 11. It does not give a Python plugin its own environment or select a Python version. All Python plugins of one profile share one environment created from the configured interpreter.

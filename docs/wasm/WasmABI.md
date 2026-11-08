@@ -93,7 +93,7 @@ WASI is not part of the supported contract.
 - The backend checks that the worker is still alive after it performs the declared registrations. A worker that exits during the apply handshake fails the apply, so a plugin is never recorded as `applied` behind a dead worker.
 - The worker cannot call back into the host synchronously, because a host import cannot return across threads. Version 1 is declaration based, so this costs no capability.
 - Arguments to the worker are projected into plain data, because `postMessage` uses structured clone, which throws on host objects such as `AbortSignal`. The projection of [ABI-unified](../ABI-unified.md) section 3.4 applies.
-- The backend is off by default. The loader option `wasm.enabled` must be set to `true` before a WebAssembly plugin is started; the operator reference is [CONTEXT](../../CONTEXT.md).
+- The backend is on by default. The loader option `wasm.enabled` set to `false` keeps a WebAssembly plugin from starting; the operator reference is [CONTEXT](../../CONTEXT.md).
 
 ## 6. What the backend does not support
 

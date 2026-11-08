@@ -287,7 +287,7 @@ async function main() {
 
   section('9. a rejected transition becomes an error result')
   const failingTarget = makeTarget([makeSnapshot({ id: 'wasmish', name: 'Wasmish', backend: 'wasm', state: 'disabled' })])
-  failingTarget.failEnable('wasmish', 'wasm backend is disabled (set config.wasm.enabled = true to opt in)')
+  failingTarget.failEnable('wasmish', 'wasm backend is disabled (config.wasm.enabled is false)')
   const failingRoot = await makeCommandsContext(makeLogger())
   registerMloaderCommand(failingRoot, failingTarget, makeLogger())
   const failingExecute = async (input) => {
@@ -298,7 +298,7 @@ async function main() {
   check('enable failure returns an error result', failedLoad?.kind === 'error', JSON.stringify(failedLoad))
   check(
     'error result carries the thrown message',
-    failedLoad?.text === 'wasm backend is disabled (set config.wasm.enabled = true to opt in)',
+    failedLoad?.text === 'wasm backend is disabled (config.wasm.enabled is false)',
     failedLoad?.text,
   )
 

@@ -54,9 +54,11 @@
         # one that is deleted. Only the set of directories is followed: after
         # editing the files of an installed plugin, run /mloader reload.
         watch: true
-        # The WebAssembly backend is disabled by default, and no WebAssembly
-        # example is released into a profile. seeds/wasm-mloader is source only:
-        # build it by hand as its README describes, install the built plugin, and
-        # run test/wasm-safety.mjs before enabling the backend.
+        # The WebAssembly backend is enabled by default. A module runs in a worker
+        # thread of the dsh process and its linear memory is not capped, so install
+        # only modules you trust. Set this to false to keep WebAssembly plugins
+        # disabled. No WebAssembly example is released into a profile:
+        # seeds/wasm-mloader is source only, so build it by hand as its README
+        # describes and install the built plugin.
         wasm:
-          enabled: false
+          enabled: true

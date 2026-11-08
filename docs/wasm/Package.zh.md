@@ -107,4 +107,4 @@ dsh 运行期间，加载器的 `/mloader install` 命令可以一步安装 WebA
 - **没有 WASI 预打开目录、没有网络、没有环境。** 执行契约见 [WasmABI](WasmABI.zh.md) 第 4 节。
 - **没有可执行归档。** `.pyz` 是 Python 约定；WebAssembly 包永远是数据。
 - **没有依赖契约。** 共享格式不携带依赖声明，WebAssembly 包也不能增加一个（[Package](../Package.zh.md) 第 6 节）。
-- **WebAssembly 后端默认关闭。** 操作者要在 WebAssembly 插件启动前把 `wasm.enabled` 设为 `true`（[CONTEXT](../../CONTEXT.md)）。
+- **WebAssembly 后端默认启用。** 操作者把 `wasm.enabled` 设为 `false` 后，WebAssembly 插件不会启动（[CONTEXT](../../CONTEXT.md)）。
