@@ -4,7 +4,7 @@ English | [简体中文](Package.zh.md)
 
 This document specifies the layout of a dsh-mloader WebAssembly plugin package, the archive that carries one compiled WebAssembly module. The archive container, extraction safety, install index, updates, removal, version compatibility and the shared limits are specified in [Package](../Package.md). This document adds the WebAssembly-specific layout and the limits that follow from one portable artifact.
 
-Status: the format is fixed. No installer implements it yet, so the loader still reads an installed plugin directory only. Extracting a package into a plugin root installs the plugin by hand, and the archive rules in [Package](../Package.md) describe the install, update and removal behavior an installer implements.
+Status: the format is fixed and the loader's Node installer implements it through the `/mloader install` command. The loader still reads an installed plugin directory only, and extracting a package into a plugin root by hand remains a valid installation.
 
 A WebAssembly module is portable across operating systems and CPU architectures. A package therefore carries one module and has no platform metadata, no per-host directory and no artifact selection step. The manifest names the module with `entry`, the same way a directory-installed plugin does.
 
@@ -13,7 +13,8 @@ A WebAssembly module is portable across operating systems and CPU architectures.
 - [1. Package contents](#1-package-contents)
 - [2. The portable artifact](#2-the-portable-artifact)
 - [3. Building a package](#3-building-a-package)
-- [4. WebAssembly-specific limits](#4-webassembly-specific-limits)
+- [4. Installing a package](#4-installing-a-package)
+- [5. WebAssembly-specific limits](#5-webassembly-specific-limits)
 
 ## 1. Package contents
 
@@ -86,7 +87,19 @@ zip -r ../plugin-id-v0.1.0.mloader.pack mloader.plugin.json plugin.wasm
 - A WebAssembly package is not executable. Do not add a shebang or a `__main__.py`, and do not use the `.pyz` suffix.
 - A packager may include a `.mloader.index.json` with `fileMd5` to publish per file checksums ahead of installation ([Package](../Package.md) section 4.1).
 
-## 4. WebAssembly-specific limits
+## 4. Installing a package
+
+While dsh runs, the loader's `/mloader install` command installs a WebAssembly package in one step:
+
+```sh
+/mloader install plugin-id-v0.1.0.mloader.pack
+```
+
+The command validates the archive with the shared rules of [Package](../Package.md), extracts it into `<profile>/mloader/plugins/<plugin-id>`, and writes the install index. It asks for a second confirmation before it replaces an identical archive or an installation whose files changed; run `/mloader ok`, `/mloader confirm`, or the same command again to confirm. A WebAssembly plugin that is loaded is reloaded after a successful update.
+
+The command installs the archive as it is. It never compiles or inspects the module, so an invalid module is discovered when the plugin starts, exactly as with a directory installation.
+
+## 5. WebAssembly-specific limits
 
 - **One artifact for every host.** A WebAssembly module is portable across operating systems and CPU architectures, so a package is never split per platform. There is no platform selection, no per-host directory and no fallback artifact.
 - **No native library.** A package carries a WebAssembly module only. A native shared library such as a `.dll` or a `.so` file is not a WebAssembly module, and no backend loads one.

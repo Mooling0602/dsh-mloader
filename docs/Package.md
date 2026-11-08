@@ -4,9 +4,9 @@ English | [简体中文](Package.zh.md)
 
 This document specifies the archive that carries an installable dsh-mloader plugin and the installation, update and removal rules that every package shares. It applies to Python packages and to WebAssembly packages. The backend-specific layout is in [python-sdk/Package](python-sdk/Package.md) and [wasm/Package](wasm/Package.md).
 
-Status: the Python backend implements this document through the runtime command line specified in [python-sdk/Package](python-sdk/Package.md) section 6. The WebAssembly package layout is fixed in [wasm/Package](wasm/Package.md), and no installer implements it yet. The loader itself never installs a plugin from an archive: installation writes the extracted directory that the loader discovers.
+Status: the loader implements this document through two installers. The `/mloader install` command installs WebAssembly packages in the loader process, and delegates Python packages to the runtime command line specified in [python-sdk/Package](python-sdk/Package.md) section 6. The loader itself never installs a plugin at load time: installation writes the extracted directory that the loader discovers.
 
-A package is a zip archive. It holds one plugin manifest at the archive root and the files that manifest names. The loader extracts the archive before it loads anything, so the archive is a transport format and never the directory the plugin runs from. The manifest decides the backend and the entry point, which means the archive layout and the manifest cannot disagree.
+A package is a zip archive. It holds one plugin manifest at the archive root and the files that manifest names. The installer extracts the archive before the loader loads anything, so the archive is a transport format and never the directory the plugin runs from. The manifest decides the backend and the entry point, which means the archive layout and the manifest cannot disagree.
 
 ## Contents
 
@@ -47,7 +47,9 @@ A rejected package leaves no partial plugin directory behind.
 
 ## 4. Installation, updates and removal
 
-The contents of a package are extracted before the loader can load them. The loader never imports code from inside an archive, so an archive that is present but not installed contributes no plugin. For Python, the command line in [python-sdk/Package](python-sdk/Package.md) section 6 performs the extraction, the update checks and the index write. The loader still only reads installed directories.
+The contents of a package are extracted before the loader can load them. The loader never imports code from inside an archive, so an archive that is present but not installed contributes no plugin. The `/mloader install` command performs the extraction, the update checks and the index write: WebAssembly packages are installed by the loader's own Node installer, and Python packages are delegated to [python-sdk/Package](python-sdk/Package.md) section 6. The loader still only reads installed directories.
+
+The command takes one or more archive paths, installs them in order, and continues after a failed package. It always targets `<profile>/mloader/plugins`, refuses the reserved example id, and asks for a second confirmation before replacing an identical archive or an installation whose files changed. Run `/mloader ok`, `/mloader confirm`, or the same command again to confirm; a package that was already loaded is reloaded after a successful update.
 
 For a profile named `web`, a package whose manifest sets `"id": "test"` extracts to this directory:
 
@@ -86,7 +88,7 @@ Installing a newer package over an existing plugin is how a plugin is updated. B
 | The MD5 differs | The installed plugin directory moves to the trash, and the new package extracts in its place. |
 | The MD5 matches | The archive is byte identical to the installed one. The loader asks for a second confirmation before it reinstalls. |
 
-The comparison is over the archive file as bytes, so an archive repacked from identical content carries a different MD5 whenever the zip metadata differs, which is what a rebuild does. A repacked archive is therefore treated as a new version even when the plugin source did not change. The Python command line expresses the second confirmation as `--force`.
+The comparison is over the archive file as bytes, so an archive repacked from identical content carries a different MD5 whenever the zip metadata differs, which is what a rebuild does. A repacked archive is therefore treated as a new version even when the plugin source did not change. The Python command line expresses the second confirmation as `--force`; the `/mloader install` command expresses it as `/mloader ok`, `/mloader confirm` or a repeat of the same command.
 
 The trash is the platform trash directory when the environment provides one. When it does not, the installed directory moves under `$TMPDIR` instead, and that location does not survive a reboot. An update replaces the previous installation, so the trash is a recovery window and not a rollback point.
 

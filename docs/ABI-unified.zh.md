@@ -8,7 +8,7 @@
 
 - [python-sdk/PyABI](python-sdk/PyABI.zh.md) 规定 Python 运行时包、两种注册风格、结果 schema 推断和子进程传输。
 - [wasm/WasmABI](wasm/WasmABI.zh.md) 规定 WebAssembly 核心 ABI 和 worker 隔离。
-- [Package](Package.zh.md) 规定两种后端共用的归档格式和安装规则。Python 后端通过运行时命令行实现它；WebAssembly 的包格式已固定，但还没有安装器实现它。
+- [Package](Package.zh.md) 规定两种后端共用的归档格式和安装规则。`/mloader install` 命令实现它：WebAssembly 包在加载器进程内安装，Python 包交给运行时命令行。
 - [python-sdk/Package](python-sdk/Package.zh.md) 和 [wasm/Package](wasm/Package.zh.md) 规定各后端的包布局。
 
 当前线上协议是版本 1。修改帧形状、清单字段或能力白名单都是契约变更；跨越进程或线程边界的变更需要提升协议版本。
@@ -443,7 +443,7 @@ Python 沙箱是进程隔离，不是权限隔离。Python 插件可以读写文
 
 目录名只是约定。插件 id 来自清单，不来自目录名。
 
-插件通过把它的目录放进一个插件根目录来安装。Python 包可以用运行时命令行从归档安装；命令见 [python-sdk/Package](python-sdk/Package.zh.md) 第 6 节，加载器本身从不读取归档。加载器管理共享环境时，一个 profile 的 Python 插件都在该环境中运行，所以需要隔离依赖集合的插件不受支持。[Package](Package.zh.md) 的包格式对 Python 已实现。[wasm/Package](wasm/Package.zh.md) 固定了 WebAssembly 的包格式，但还没有安装器实现它。
+插件通过把它的目录放进一个插件根目录来安装。包也可以用 `/mloader install` 命令从归档安装，Python 包还可以用运行时命令行安装；共用规则见 [Package](Package.zh.md)，加载器在加载插件时从不读取归档。加载器管理共享环境时，一个 profile 的 Python 插件都在该环境中运行，所以需要隔离依赖集合的插件不受支持。[Package](Package.zh.md) 的包格式由加载器的 Node 安装器实现 WebAssembly 一侧，由 Python 运行时命令行实现 Python 一侧。
 
 profile 的 `node_modules` 不是受支持的安装位置。它归包管理器所有，`pnpm install` 或 `pnpm prune` 可以重建它，所以手工放在那里的插件不稳定。
 
@@ -492,4 +492,4 @@ dsh-mloader 为运行 dsh 的人提供三个操作界面：
 9. 不自动重启崩溃的插件。
 10. 不监听已安装插件内部的文件。清单或入口文件变化只有在重新加载或重启后才生效。
 11. 不给 Python 插件单独的环境，也不选择 Python 版本。同一个 profile 的所有 Python 插件共用一个由配置解释器创建的环境。
-12. 不自行从归档安装包。Python 运行时命令行负责这项安装，目前也没有工具安装 WebAssembly 包。
+12. 在加载插件时不从归档安装包。`/mloader install` 命令在加载器进程内安装 WebAssembly 包，并把 Python 包交给运行时命令行；两者都会写出加载器读取的已安装目录。

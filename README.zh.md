@@ -55,6 +55,8 @@ dsh plugin --profile web remove dsh-mloader
 
 插件目录里包含一个 `mloader.plugin.json` 清单文件和入口文件。dsh 运行期间把目录复制进去即可：加载器会监听插件根目录，新出现的目录自动挂载，被删除的目录自动卸载，都不用重启。改完已装插件的文件后，用 `/mloader reload <plugin-id>` 重新加载。加载器通过 dsh 定位当前 profile，所以不需要配置任何路径。Python 插件需要 Python 3.10 或更高版本。WASM 后端默认关闭，开启方法见 [CONTEXT](CONTEXT.md)。监听默认开启，关掉的方法见[配置](#配置)，关掉之后新增插件需要重启 dsh。
 
+加载器也可以替你安装插件包。dsh 运行期间，`/mloader install ./plugin.mloader.pack` 接受一个或多个归档，把每个包装进 `<profile>/mloader/plugins`，再由加载器挂载。命令从清单识别后端：WebAssembly 包由加载器自己安装，Python 包交给 Python SDK 命令行。命令拒绝示例的保留 id，并在插件已加载时自动重新加载。如果归档已经安装过，或安装后的文件被改过，命令会请求二次确认：运行 `/mloader ok`、`/mloader confirm`，或再次执行同一命令。
+
 ## Python 依赖
 
 同一个 profile 下的所有 Python 插件共用一个虚拟环境：`~/.dsh/profiles/<profile>/mloader/.venv`。加载器通常在第一个 Python 插件启动时用 uv 创建它，之后用这个环境启动每个插件。第三方包声明在 `pyproject.toml` 的 `[project].dependencies` 中；也支持 `requirements.txt`。两个文件同时存在时，同一个包以 pyproject 为准，只有 requirements.txt 才有的条目会在安装时合并进 pyproject。只带 `requirements.txt` 的插件改用 Python 的 venv 模块和 pip 安装，并给出警告。暂不支持选择 Python 版本，也不支持按插件隔离环境，所以插件共享同一套依赖。
@@ -71,7 +73,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 
 ## WebAssembly 示例
 
-仓库在 `seeds/` 下提供两个示例。`hello-mloader` 是完整的 Python 示例，profile 会自动收到它。`wasm-mloader` 是只含源码的 Rust 示例，加载器不会释放它，仓库也不提交编译后的 `.wasm`。用 `./seeds/wasm-mloader/build.sh` 构建，把生成的 `dist/wasm-mloader` 目录复制到 profile 插件根目录，并启用 `wasm.enabled`。构建要求和示例契约见 [seeds/wasm-mloader](seeds/wasm-mloader/README.md)。
+仓库在 `seeds/` 下提供两个示例。`hello-mloader` 是完整的 Python 示例，profile 会自动收到它。`wasm-mloader` 是只含源码的 Rust 示例，加载器不会释放它，仓库也不提交编译后的 `.wasm`。用 `./seeds/wasm-mloader/build.sh` 构建，然后把生成的 `dist/wasm-mloader` 目录复制到 profile 插件根目录，或者把这个目录打成 zip 并用 `/mloader install` 安装，并启用 `wasm.enabled`。构建要求和示例契约见 [seeds/wasm-mloader](seeds/wasm-mloader/README.md)。
 
 ## 查看与切换插件
 
@@ -82,7 +84,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | 你 | `/mloader` 命令 |
 | 模型 | `mloader_status`、`mloader_info`、`mloader_load`、`mloader_unload` 和 `mloader_reload` 工具 |
 
-`/mloader` 列出全部插件，`/mloader <plugin-id>` 查看单个插件，`/mloader load <plugin-id>`、`/mloader unload <plugin-id>` 和 `/mloader reload <plugin-id>` 在运行时切换插件。只有已经装在 profile 里的插件才能被加载。
+`/mloader` 列出全部插件，`/mloader <plugin-id>` 查看单个插件，`/mloader load <plugin-id>`、`/mloader unload <plugin-id>` 和 `/mloader reload <plugin-id>` 在运行时切换插件。`/mloader install <file> ...` 安装插件包，`/mloader ok` 或 `/mloader confirm` 完成待确认的安装。只有已经装在 profile 里的插件才能被加载。
 
 被托管的插件也可以注册自己的斜杠命令。随包示例注册了 `/hello-mloader` 和 `/hello-add`，后者是 `hello_add` 工具的命令形式。工具和命令是彼此独立的注册：插件按需要选择对用户和模型暴露哪一面，加载器不会把一面镜像成另一面。插件命令与 dsh 及其他插件共用一个全局命名空间：插件按优先级声明候选名，加载器注册第一个尚未被占用的名字。所有候选都被占用时，已存在的命令获胜，插件在没有该命令的情况下继续加载。
 
@@ -125,7 +127,7 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 - [docs/ABI-unified](docs/ABI-unified.zh.md)：面向第三方插件作者的共享契约，包括清单格式、能力白名单、RPC 协议、生命周期、后端接口、安全模型和安装布局。
 - [docs/python-sdk/PyABI](docs/python-sdk/PyABI.zh.md)：Python 后端契约，包括 SDK 导入方式、两种注册风格、结果 schema 推断和进程传输。
 - [docs/wasm/WasmABI](docs/wasm/WasmABI.zh.md)：WebAssembly 核心 ABI，包括必需导出、声明对象和 worker 超时。
-- [docs/Package](docs/Package.zh.md)：两种后端共用的归档格式与安装规则。Python 后端已经实现；WebAssembly 的包格式已固定，但还没有安装器。
+- [docs/Package](docs/Package.zh.md)：两种后端共用的归档格式与安装规则。`/mloader install` 命令为 WebAssembly 实现这些规则，并把 Python 包交给 Python 命令行。
 - [docs/python-sdk/Package](docs/python-sdk/Package.zh.md)：Python 插件包布局、依赖、共享环境和命令行。
 - [docs/wasm/Package](docs/wasm/Package.zh.md)：WebAssembly 插件包布局，一份清单和一个便携 `.wasm` 入口。
 - [CONTEXT](CONTEXT.md)：面向维护者的技术细节，包括构建与产物策略、配置默认值、测试方法和重启验收清单。

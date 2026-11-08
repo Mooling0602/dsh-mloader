@@ -4,9 +4,9 @@
 
 本文规定 dsh-mloader Python 插件包的布局。归档容器、解压安全、安装索引、更新、删除、版本兼容性和共用限制见 [Package](../Package.zh.md)。本文补充 Python 特有的布局和构建规则。
 
-状态：Python 运行时的命令行已经实现本文。加载器不会从归档安装插件；它读取插件根目录下的插件目录。第 6 节规定的命令行负责把目录打包成包，并把包安装进 profile，因此打包者和加载器按同一种形式对齐。
+状态：Python 运行时的命令行已经实现本文。加载器不会在加载时从归档安装插件；它读取插件根目录下的插件目录。第 6 节规定的命令行负责把目录打包成包，并把包安装进 profile，加载器的 `/mloader install` 命令把 Python 包交给它，因此打包者和加载器按同一种形式对齐。
 
-一个 Python 包携带一份清单和清单指定的 Python 代码。清单设置 `"backend": "python"`，并用 `entry` 指定入口文件。加载器会先解压归档再加载内容，所以归档只是传输格式，永远不是插件运行的目录。
+一个 Python 包携带一份清单和清单指定的 Python 代码。清单设置 `"backend": "python"`，并用 `entry` 指定入口文件。安装器会先解压归档，加载器随后才加载内容，所以归档只是传输格式，永远不是插件运行的目录。
 
 ## 1. 包内容
 
@@ -195,6 +195,8 @@ python3 "$CLI" install ./my-plugin.mloader.pack --profile "$PROFILE"
 `remove` 和更新会把旧目录移到平台回收站；平台没有回收站时移到 `$TMPDIR` 下。
 
 加载器从不自行运行 `pack` 或 `install`。它在启动 Python 插件前运行 `env sync`，并读取已经安装的插件目录。
+
+dsh 运行期间，加载器的 `/mloader install` 命令接受同样的归档。它从清单识别后端，把 Python 包交给这个命令行，并安装到 `<profile>/mloader/plugins`。这个命令行的确认参数对应命令自身的二次确认：运行 `/mloader ok`、`/mloader confirm`，或再次执行同一命令。
 
 ## 7. Python 特有的限制
 

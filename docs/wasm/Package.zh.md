@@ -4,7 +4,7 @@
 
 本文规定 dsh-mloader WebAssembly 插件包的布局，即承载一个已编译 WebAssembly 模块的归档。归档容器、解压安全、安装索引、更新、删除、版本兼容性和共用限制见 [Package](../Package.zh.md)。本文补充 WebAssembly 特有的布局，以及单一便携产物带来的限制。
 
-状态：格式已固定。目前还没有安装器实现它，所以加载器仍只读取已安装的插件目录。把包解压到插件根目录即可手工安装插件；[Package](../Package.zh.md) 中的归档规则描述安装器实现的安装、更新与删除行为。
+状态：格式已固定，加载器的 Node 安装器通过 `/mloader install` 命令实现它。加载器仍只读取已安装的插件目录；把包手工解压到插件根目录，仍然是一种有效的安装方式。
 
 WebAssembly 模块可跨操作系统和 CPU 架构使用。因此一个包携带一个模块，没有平台元数据，也没有按宿主划分的目录或选择产物的步骤。清单用 `entry` 指定这个模块，与以目录安装的插件完全相同。
 
@@ -13,7 +13,8 @@ WebAssembly 模块可跨操作系统和 CPU 架构使用。因此一个包携带
 - [1. 包内容](#1-包内容)
 - [2. 便携产物](#2-便携产物)
 - [3. 构建包](#3-构建包)
-- [4. WebAssembly 特有的限制](#4-webassembly-特有的限制)
+- [4. 安装包](#4-安装包)
+- [5. WebAssembly 特有的限制](#5-webassembly-特有的限制)
 
 ## 1. 包内容
 
@@ -86,7 +87,19 @@ zip -r ../plugin-id-v0.1.0.mloader.pack mloader.plugin.json plugin.wasm
 - WebAssembly 包不可执行。不要加 shebang 或 `__main__.py`，也不要使用 `.pyz` 后缀。
 - 打包者可以在归档里附带带 `fileMd5` 的 `.mloader.index.json`，提前发布逐文件校验和（[Package](../Package.zh.md) 第 4.1 节）。
 
-## 4. WebAssembly 特有的限制
+## 4. 安装包
+
+dsh 运行期间，加载器的 `/mloader install` 命令可以一步安装 WebAssembly 包：
+
+```sh
+/mloader install plugin-id-v0.1.0.mloader.pack
+```
+
+命令按 [Package](../Package.zh.md) 的共用规则校验归档，把它解压到 `<profile>/mloader/plugins/<plugin-id>`，并写入安装索引。在替换相同归档或替换安装后文件被改动的目录之前，它会请求二次确认；运行 `/mloader ok`、`/mloader confirm`，或再次执行同一命令来确认。已加载的 WebAssembly 插件在更新成功后会自动重新加载。
+
+命令按归档原样安装，从不编译或检查模块，所以无效模块在插件启动时才被发现，与以目录安装的行为一致。
+
+## 5. WebAssembly 特有的限制
 
 - **所有宿主共用一个产物。** WebAssembly 模块可跨操作系统和 CPU 架构使用，所以包从不按平台拆分。没有平台选择，没有按宿主划分的目录，也没有备用产物。
 - **没有原生库。** 包只携带 WebAssembly 模块。`.dll` 或 `.so` 这类原生共享库不是 WebAssembly 模块，任何后端都不会加载它。

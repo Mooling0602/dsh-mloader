@@ -14,6 +14,7 @@
  * @module commands/mloader
  */
 
+import type { InstallResult } from '../installer/install.js'
 import { format } from '../tools/status.js'
 import type {
   Disposer,
@@ -47,6 +48,11 @@ export interface MloaderCommandTarget {
   disable(id: string): Promise<PluginSnapshot>
   /** Restart a loaded plugin, or start it when it is not loaded. */
   reload(id: string): Promise<PluginSnapshot>
+  /**
+   * Install one or more plugin packages. Absent when the loader cannot resolve
+   * the profile plugin directory.
+   */
+  install?(paths: string[], options: { force: boolean }): Promise<InstallResult[]>
 }
 
 /** Result of one command invocation, as the commands service expects it. */
@@ -69,7 +75,30 @@ interface MloaderCommandService {
 }
 
 /** Words that name a command form and therefore never select a plugin by id. */
-const RESERVED_WORDS = new Set(['status', 'help', 'load', 'unload', 'reload'])
+const RESERVED_WORDS = new Set([
+  'status',
+  'help',
+  'load',
+  'unload',
+  'reload',
+  'install',
+  'ok',
+  'confirm',
+])
+
+/** A package batch waiting for the operator's second confirmation. */
+interface PendingInstall {
+  /** Input text that produced the pending batch, used to detect a re-run. */
+  rawInput: string
+  /** Package paths that need confirmation. */
+  paths: string[]
+}
+
+/** Mutable state of one registered command, kept across invocations. */
+interface CommandState {
+  /** The batch waiting for confirmation, when one exists. */
+  pending?: PendingInstall
+}
 
 /** Return true when a plugin holds a running backend. */
 function isLoaded(state: PluginState): boolean {
@@ -110,14 +139,16 @@ function renderState(plugin: PluginSnapshot): string {
 /** Render the usage text for every accepted form. */
 function renderUsage(commandName: string): string {
   return [
-    `Usage: /${commandName} [status | <id> | load <id> | unload <id> | reload <id>]`,
+    `Usage: /${commandName} [status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | ok | confirm]`,
     '',
     'Forms:',
-    '  status        List every external plugin.',
-    '  <id>          Show details for one plugin.',
-    '  load <id>     Load a plugin that is not loaded.',
-    '  unload <id>   Unload a plugin that is loaded.',
-    '  reload <id>   Reload a plugin, loading it first when it is not loaded.',
+    '  status          List every external plugin.',
+    '  <id>            Show details for one plugin.',
+    '  load <id>       Load a plugin that is not loaded.',
+    '  unload <id>     Unload a plugin that is loaded.',
+    '  reload <id>     Reload a plugin, loading it first when it is not loaded.',
+    '  install <file>  Install one or more plugin packages.',
+    '  ok, confirm     Confirm the pending installation.',
   ].join('\n')
 }
 
@@ -209,41 +240,189 @@ export async function runMloaderAction(
   }
 }
 
+/** Split command input into tokens, honouring single and double quotes. */
+function tokenize(input: string): string[] {
+  const tokens: string[] = []
+  let current = ''
+  let started = false
+  let quote: "'" | '"' | undefined
+  for (const character of input) {
+    if (quote !== undefined) {
+      if (character === quote) {
+        quote = undefined
+      } else {
+        current += character
+      }
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      started = true
+      continue
+    }
+    if (/\s/u.test(character)) {
+      if (started) tokens.push(current)
+      started = false
+      current = ''
+      continue
+    }
+    current += character
+    started = true
+  }
+  if (quote !== undefined) {
+    throw new Error(`unterminated ${quote === "'" ? 'single' : 'double'} quote`)
+  }
+  if (started) tokens.push(current)
+  return tokens
+}
+
+/** Outcome of one install batch, after automatic reloads. */
+interface InstallExecution {
+  result: CommandResult
+  results: InstallResult[]
+}
+
+/** Run one install batch, reload loaded plugins and render the summary. */
+async function executeInstall(
+  target: MloaderCommandTarget,
+  paths: string[],
+  force: boolean,
+): Promise<InstallExecution> {
+  if (typeof target.install !== 'function') {
+    return {
+      result: {
+        kind: 'error',
+        text: 'Package installation is unavailable: the profile plugin directory was not detected.',
+      },
+      results: [],
+    }
+  }
+  let results: InstallResult[]
+  try {
+    results = await target.install(paths, { force })
+  } catch (error) {
+    return { result: { kind: 'error', text: messageOf(error) }, results: [] }
+  }
+
+  const installed = results.filter((item) => item.status === 'installed' || item.status === 'updated')
+  const pending = results.filter((item) => item.status === 'needs-confirmation')
+  const failed = results.filter((item) => item.status === 'failed')
+  const lines: string[] = []
+
+  if (installed.length > 0) {
+    lines.push(`${installed.length} package(s) installed:`)
+    for (const item of installed) {
+      const id = item.id ?? item.path
+      const version = item.version === undefined ? '' : ` ${item.version}`
+      lines.push(
+        `  ${item.status} ${id}${version} (${item.backend ?? 'unknown'}) at ${item.directory ?? 'unknown directory'}`,
+      )
+    }
+  }
+  if (pending.length > 0) {
+    lines.push(`${pending.length} package(s) need confirmation:`)
+    for (const item of pending) lines.push(`  ${item.path}: ${item.message ?? 'confirmation required'}`)
+    lines.push('Run /mloader ok to confirm, or run the same command again.')
+  }
+  if (failed.length > 0) {
+    lines.push(`${failed.length} package(s) failed:`)
+    for (const item of failed) lines.push(`  ${item.path}: ${item.message ?? 'installation failed'}`)
+  }
+
+  for (const item of installed) {
+    if (item.id === undefined) continue
+    const known = target.list().find((plugin) => plugin.id === item.id)
+    if (known === undefined || !isLoaded(known.state)) continue
+    try {
+      await target.reload(item.id)
+      lines.push(`reloaded ${item.id}.`)
+    } catch (error) {
+      lines.push(`warning: reload of ${item.id} failed: ${messageOf(error)}`)
+    }
+  }
+  for (const warning of new Set(results.flatMap((item) => item.warnings))) {
+    lines.push(`warning: ${warning}`)
+  }
+  if (lines.length === 0) lines.push('No package was installed.')
+
+  return {
+    result: {
+      kind: failed.length > 0 || pending.length > 0 ? 'error' : 'success',
+      text: lines.join('\n'),
+    },
+    results,
+  }
+}
+
 /**
  * Dispatch one invocation.
  *
  * The input is the text after the command name. Unknown or malformed input
  * returns the usage text; a bare token that is not a reserved word selects one
  * plugin, so a plugin may not be addressed by a name the parser claims first.
+ * An install batch that needs confirmation is remembered so that `ok`,
+ * `confirm` or a re-run of the same input can complete it.
  */
 async function dispatch(
   target: MloaderCommandTarget,
   commandName: string,
   rawInput: string,
+  state: CommandState,
 ): Promise<CommandResult> {
-  const tokens = rawInput.trim().split(/\s+/).filter((token) => token.length > 0)
+  const input = rawInput.trim()
+  let tokens: string[]
+  try {
+    tokens = tokenize(input)
+  } catch (error) {
+    return { kind: 'error', text: messageOf(error) }
+  }
 
   if (tokens.length === 0) {
     return { kind: 'success', text: format({ plugins: target.list() }) }
   }
+
+  const first = tokens[0] as string
+  if (first === 'install') {
+    const paths = tokens.slice(1)
+    if (paths.length === 0) {
+      return { kind: 'error', text: `Usage: /${commandName} install <file> [<file> ...]` }
+    }
+    if (state.pending !== undefined && state.pending.rawInput === input) {
+      const pending = state.pending
+      state.pending = undefined
+      return (await executeInstall(target, pending.paths, true)).result
+    }
+    const execution = await executeInstall(target, paths, false)
+    const needs = execution.results
+      .filter((item) => item.status === 'needs-confirmation')
+      .map((item) => item.path)
+    state.pending = needs.length > 0 ? { rawInput: input, paths: needs } : undefined
+    return execution.result
+  }
+  if (first === 'ok' || first === 'confirm') {
+    if (tokens.length !== 1) return { kind: 'error', text: renderUsage(commandName) }
+    if (state.pending === undefined) return { kind: 'error', text: 'Nothing to confirm.' }
+    const pending = state.pending
+    state.pending = undefined
+    return (await executeInstall(target, pending.paths, true)).result
+  }
+
   if (tokens.length === 1) {
-    const word = tokens[0] as string
-    if (word === 'status') {
+    if (first === 'status') {
       return { kind: 'success', text: format({ plugins: target.list() }) }
     }
-    if (word === 'help') {
+    if (first === 'help') {
       return { kind: 'success', text: renderUsage(commandName) }
     }
-    if (RESERVED_WORDS.has(word)) {
+    if (RESERVED_WORDS.has(first)) {
       return { kind: 'error', text: renderUsage(commandName) }
     }
-    return await runMloaderAction(target, 'info', word)
+    return await runMloaderAction(target, 'info', first)
   }
   if (tokens.length === 2) {
-    const word = tokens[0] as string
     const id = tokens[1] as string
-    if (word === 'load' || word === 'unload' || word === 'reload') {
-      return await runMloaderAction(target, word, id)
+    if (first === 'load' || first === 'unload' || first === 'reload') {
+      return await runMloaderAction(target, first, id)
     }
   }
   return { kind: 'error', text: renderUsage(commandName) }
@@ -290,14 +469,15 @@ export function registerMloaderCommand(
     return undefined
   }
 
+  const state: CommandState = {}
   const dispose = commands.register({
     name: commandName,
-    description: 'Manage the external plugins hosted by dsh-mloader.',
+    description: 'Manage and install the external plugins hosted by dsh-mloader.',
     input: {
-      hint: '[status | <id> | load <id> | unload <id> | reload <id>]',
+      hint: '[status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | ok | confirm]',
     },
     async handler(invocation) {
-      return await dispatch(target, commandName, invocation?.rawInput ?? '')
+      return await dispatch(target, commandName, invocation?.rawInput ?? '', state)
     },
   })
 

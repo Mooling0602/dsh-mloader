@@ -37,6 +37,7 @@ import type { WasmFailure } from './backends/wasm.js'
 import { createStatusTool } from './tools/status.js'
 import { createManagementTools } from './tools/manage.js'
 import { DEFAULT_COMMAND_NAME, registerMloaderCommand } from './commands/mloader.js'
+import { createPackageInstaller } from './installer/install.js'
 import { registerMloaderHttp, WasmDisabledError } from './http.js'
 import { installSeedExamples } from './seed.js'
 import { createConsole } from './console.js'
@@ -915,11 +916,27 @@ export async function apply(ctx: LoaderContext, config: LoaderConfig = {}): Prom
 
   if (settings.watch !== false) manager.watchRoots()
 
+  // Package installation always targets <profile>/mloader/plugins. Without a
+  // detected profile the command has nowhere to install, so the capability is
+  // absent and the command reports that installation is unavailable.
+  const installPluginsDir = profilePluginsDir(settings.profileDir, baseUrl)
+  const installer = detectedProfile !== undefined && installPluginsDir !== undefined
+    ? createPackageInstaller({
+        profileDir: detectedProfile,
+        pluginsDir: installPluginsDir,
+        pythonBin: settings.pythonBin ?? 'python3',
+        shellPath: settings.shellPath,
+        logger,
+      })
+    : undefined
   const target = {
     list: () => manager.list(),
     enable: (id: string) => manager.enable(id),
     disable: (id: string) => manager.disable(id),
     reload: (id: string) => manager.reload(id),
+    ...installer === undefined ? {} : {
+      install: (paths: string[], options: { force: boolean }) => installer.install(paths, options),
+    },
   }
   if (settings.statusTool !== false) {
     for (const tool of createManagementTools(target)) {

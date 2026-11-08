@@ -12,9 +12,13 @@
  *      display fields, so no language falls back to the manifest for one field.
  *   3. exports maps ./locale/*.json and ./package.json, the resources the host
  *      resolves before it can read a title, a description or a fallback.
- *   4. files ships locale/*.json, so a packed install carries what the exports
- *      point at.
- *   5. Every locale file resolves from inside the package into one directory,
+ *   4. Every locale meta.detail names a package-relative Markdown document
+ *      inside the package, English names README.md and Chinese names
+ *      README.zh.md, and the detail page shows that file instead of the
+ *      README fallback.
+ *   5. files ships locale/*.json and both detail documents, so a packed
+ *      install carries what the exports and meta.detail point at.
+ *   6. Every locale file resolves from inside the package into one directory,
  *      which is how the host discovers the dictionaries beside the English one.
  *
  * The suite reads the package itself and uses the Node standard library only,
@@ -102,19 +106,53 @@ async function main() {
       JSON.stringify(meta?.description))
   }
 
-  section('3. exports exposes the resources the host resolves')
+  section('3. Every locale names the localized detail document')
+  const expectedDetails = new Map([
+    ['en', 'README.md'],
+    ['zh', 'README.zh.md'],
+  ])
+  for (const language of languages) {
+    const detail = locales.get(language)?.meta?.detail
+    check(`locale/${language}.json meta.detail is a non-empty string`, filled(detail), JSON.stringify(detail))
+    check(
+      `locale/${language}.json meta.detail is a relative Markdown path`,
+      typeof detail === 'string' &&
+        /\.(?:md|markdown)$/iu.test(detail) &&
+        !detail.includes('\\') &&
+        !/^[A-Za-z][A-Za-z\d+.-]*:/u.test(detail) &&
+        !detail.split('/').some((segment) => segment === '' || segment === '.' || segment === '..'),
+      JSON.stringify(detail),
+    )
+    if (expectedDetails.has(language)) {
+      check(
+        `locale/${language}.json meta.detail names ${expectedDetails.get(language)}`,
+        detail === expectedDetails.get(language),
+        JSON.stringify(detail),
+      )
+    }
+  }
+  const detailFiles = [...new Set([...expectedDetails.values()])]
+  for (const relative of detailFiles) {
+    check(`${relative} exists beside package.json`, (await readFile(join(packageRoot, relative)).catch(() => undefined)) !== undefined)
+  }
+
+  section('4. exports exposes the resources the host resolves')
   check("exports maps './locale/*.json'", manifest.exports?.['./locale/*.json'] === './locale/*.json',
     JSON.stringify(manifest.exports?.['./locale/*.json']))
   check("exports maps './package.json'", manifest.exports?.['./package.json'] === './package.json',
     JSON.stringify(manifest.exports?.['./package.json']))
 
-  section('4. files ships the locale directory and the bundled examples')
+  section('5. files ships the locale directory, the detail documents and the bundled examples')
   check("files includes 'locale/*.json'", Array.isArray(manifest.files) && manifest.files.includes('locale/*.json'),
     JSON.stringify(manifest.files))
   check("files includes 'seeds'", Array.isArray(manifest.files) && manifest.files.includes('seeds'),
     JSON.stringify(manifest.files))
+  for (const relative of detailFiles) {
+    check(`files includes '${relative}'`, Array.isArray(manifest.files) && manifest.files.includes(relative),
+      JSON.stringify(manifest.files))
+  }
 
-  section('5. Every locale file resolves from inside the package')
+  section('6. Every locale file resolves from inside the package')
   const name = manifest.name
   check('the manifest resolves', resolveIn(`${name}/package.json`) === join(packageRoot, 'package.json'),
     String(resolveIn(`${name}/package.json`)))

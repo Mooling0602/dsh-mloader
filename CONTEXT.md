@@ -67,16 +67,21 @@ src/
   tools/status.ts          mloader_status tool and the shared status formatter
   tools/manage.ts          model-facing plugin detail and lifecycle tools
   commands/mloader.ts      /mloader command group and shared lifecycle operations
+  installer/
+    zip.ts                 central directory reader, entry checksums and archive safety
+    package.ts             shared package validation, manifest parsing and backend detection
+    install.ts             WebAssembly install pipeline and Python command delegation
+    trash.ts               platform trash move for a replaced installation
 scripts/build-client.mjs   deterministic build of the committed client bundle
 client.js                  committed generated browser bundle
-locale/en.json             title and description the Plugins page renders
-locale/zh.json             Simplified Chinese copy of the same two fields
+locale/en.json             display metadata and detail document the Plugins page renders
+locale/zh.json             Simplified Chinese copy of the same fields
 tsconfig.client.json       compiler configuration for src/client
 seeds/hello-mloader/       released Python example: manifest, plugin.py and built-in marker
 seeds/wasm-mloader/        source-only Rust WebAssembly example and build script
 test/                      standalone suites and their fixtures
 docs/ABI-unified.md        shared plugin contract
-docs/Package.md             shared package format and install rules, implemented for Python
+docs/Package.md             shared package format and install rules, implemented by both installers
 docs/python-sdk/PyABI.md   Python backend contract and SDK
 docs/python-sdk/Package.md Python package layout, dependencies and command line
 docs/wasm/WasmABI.md       WebAssembly core ABI
@@ -112,7 +117,8 @@ The Python SDK is a flat package. Its content is the directory `src/runtime/pyth
 - `client.js` at the repository root is a committed generated artifact. Its header says the file is generated. Never edit it by hand; change `src/client/core.ts` and run `pnpm build`.
 - The build is deterministic: the same source produces the same bytes, so `client.js` changes only when its source or the build script changes. The `.build/` intermediate output is ignored by git.
 - `package.json` declares the bundle through `exports["./client"]` and `dsh.client` (`platform: "web"` plus the `ui-plugin-manager`, `ui-slots` and `locale` client services to inject), and `files` includes `client.js`. Only the web client module system loads the bundle; the host plugin works without it.
-- The Plugins page shows the package title and description from `locale/en.json` and `locale/zh.json`, not from `package.json`'s `description`. The host reads `<name>/locale/en.json` through the package exports as the discovery entry, then resolves every other `.json` in that directory through the same exports. A package without the locale resources therefore renders no description at all, and one without the `./package.json` export loses the manifest fallback for a field no dictionary supplies. Both files carry a `meta.title` and a `meta.description`, and the host rejects the whole read when either is present but not a non-empty string. `files` ships `locale/*.json`, so a packed install carries what the exports point at.
+- The Plugins page shows the package title and description from `locale/en.json` and `locale/zh.json`, not from `package.json`'s `description`. The host reads `<name>/locale/en.json` through the package exports as the discovery entry, then resolves every other `.json` in that directory through the same exports. A package without the locale resources therefore renders no description at all, and one without the `./package.json` export loses the manifest fallback for a field no dictionary supplies. Both files carry a `meta.title` and a `meta.description`, and the host rejects the whole read when either is present but not a non-empty string.
+- **The detail page document is localized by `meta.detail`.** A locale file may name a package-relative `.md` or `.markdown` document in `meta.detail`. The host walks the UI language chain (`zh-CN` → `zh` → `en`), takes the first locale that declares a detail, and renders that file on the bundle detail page. Without any declaration it falls back to the package README, which is `README.md` and is not language aware. A declared file that does not exist fails the read instead of falling back. This package therefore declares `README.md` for English and `README.zh.md` for Chinese, and `files` ships both READMEs beside `locale/*.json`, so a packed install carries what the detail page reads.
 
 ### Python runtime package
 
@@ -200,8 +206,18 @@ The command derives the profile from the environment path, so `--profile` is opt
 ### WebAssembly plugin packages
 
 - **The format is one portable artifact.** A package carries `mloader.plugin.json` and one `.wasm` entry at the archive root, with no platform metadata and no artifact selection ([docs/wasm/Package.md](docs/wasm/Package.md)). A WebAssembly module is portable across operating systems and CPU architectures, so a per-host build would describe a difference the runtime does not have.
-- **No installer implements the format.** The loader reads installed directories only, so extracting a package into a plugin root installs it by hand.
-- **The installer is a Node tool of this repository.** It uses the Node.js runtime the loader already requires, not the Python runtime package, and it builds no native artifacts. A graphical installer with a file picker or an upload surface is out of scope for now.
+- **The WebAssembly installer is a Node tool of this repository.** It runs in the dsh process behind `/mloader install`, uses the Node.js runtime the loader already requires, needs no Python runtime and builds no native artifacts. A graphical installer with a file picker or an upload surface is out of scope for now.
+- **Python packages are delegated.** The loader detects `backend: "python"` from the manifest and runs the Python runtime command line (`run_cli.py install ... --json`), which owns the requirements merge, the shared environment and the index write.
+
+### Package installation
+
+- **The command installs archives, not directories.** `/mloader install <file> [<file> ...]` accepts one or more package archives. A batch installs in the order given, continues after a failed package and reports one line per package. A single installation is atomic; a batch never rolls back an earlier package.
+- **The target is fixed.** Every command installation goes to `<profile>/mloader/plugins`. A loader without a detected profile does not expose the install capability, and the command reports that installation is unavailable.
+- **Backend dispatch happens in the loader.** The loader reads the manifest from the archive and validates the shared archive rules before extracting anything. A WebAssembly package is installed in the loader process. A Python package is delegated to the Python runtime command line with the profile, the plugin directory, the configured interpreter, the console PATH and `--force` when the operator confirmed.
+- **Confirmation is command state.** An archive that is already installed, an installation without an index, or installed files that changed need a second confirmation. The command lists the reasons and keeps the pending paths; `/mloader ok`, `/mloader confirm` or a repeat of the same input installs only those pending paths with the confirmation flag. A different install command does not confirm them.
+- **The reserved example id is refused.** `hello-mloader` belongs to the bundled example, so the installer rejects a package that claims it before extraction.
+- **A loaded plugin is reloaded after the update.** The command asks the manager to reload any installed plugin whose id is already loaded. A reload failure is reported on the install summary and leaves the new directory installed.
+- **A path argument is resolved by dsh.** The command tokenizer honours single and double quotes, so a path with spaces works when quoted. A relative path resolves against the process working directory, and a leading `~` expands to the home directory.
 
 ### Build
 
@@ -250,6 +266,10 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `reentrancy.mjs` | a real Python subprocess survives reentrant event delivery | no |
 | `exec-payload.mjs` | host exec objects cross the process boundary safely; tools stay usable after a dirty payload | no |
 | `command.mjs` | the `/mloader` command group on a real command runtime: list, detail, load, unload, reload, usage and reserved words | no |
+| `install-command.mjs` | the install forms on the command dispatcher: batch order, confirmation state, repeat confirmation, quoting, summaries and automatic reload | no |
+| `installer.mjs` | WebAssembly install, index, identical archive and edited file confirmation, trash, nested manifest, batch failure, Python delegation and command failures | no |
+| `installer-package.mjs` | shared archive validation, manifest grammar, reserved id, WebAssembly layout and shipped checksums | no |
+| `installer-zip.mjs` | central directory reader, stored and deflated entries, prepended data, limits and malformed entries | no |
 | `command-plugin.mjs` | external plugin command nodes: Python registration, candidate fallback and the retreat rule, absent service degradation, the Python command deadline, WebAssembly declaration and `command.call`, failure convergence after a WebAssembly command timeout, ledger revocation and the status output | Python always; WebAssembly needs the command fixture |
 | `profile-install.mjs` | profile path resolution and plugin loading, including `ctx.baseUrl` | no |
 | `seed.mjs` | bundled Python example release and refresh, source-only wasm exclusion, reserved id enforcement, the built-in marker, the example commands and the tool-command pairing | no |
@@ -262,7 +282,7 @@ Run one or two suites per command. Each takes a few seconds, and leaving an inte
 | `output-inference.mjs` | result schema derived from a return annotation on both registration styles, the mapping table, explicit `output` precedence, and the host default for an absent, `Any` or unresolvable annotation | no |
 | `encoding.mjs` | UTF-8 standard streams survive a manifest that sets `PYTHONIOENCODING` to ASCII, for a non-ASCII value and for a non-ASCII write to the detached standard output | no |
 | `bytecode.mjs` | no `__pycache__` under the default, and one under `enablePyc: true` | no |
-| `package-meta.mjs` | the locale files, their `meta.title` and `meta.description`, the exports that expose them and the `files` entry that ships them | no |
+| `package-meta.mjs` | the locale files, their `meta.title`, `meta.description` and `meta.detail`, the localized README documents, the exports that expose them and the `files` entries that ship them | no |
 | `python-package.mjs` | pack, install, requirements merge, install index, update confirmation, trash removal, the Python 3.10 TOML fallback, the requirements only venv path and unsafe archive rejection | no |
 | `python-env.mjs` | shared profile environment, installed SDK console script, uv requirement, venv module fallback, and the loader starting a plugin with the shared interpreter | no |
 | `config-editor.mjs` | Configuration projection, validation and revision conflicts | no |
@@ -483,7 +503,10 @@ Each rule below has a concrete failure behind it. The rule is what must hold now
 - **The management tools share the command operations.** `mloader_info`, `mloader_load`, `mloader_unload` and `mloader_reload` each require an exact plugin `id` and return the same text as the corresponding command form. Failed operations raise tool errors. The tools register when `statusTool` is enabled, independently of the optional command service and the `command` setting, and are disposed with the loader. Load, unload and reload affect runtime state only; they do not install plugins or change manifests.
 - **The command service is optional.** The loader does not inject `commands`; it probes `ctx.get('commands')` at runtime and skips command registration with a debug log when the service is missing. A missing command must never prevent plugin mounting.
 - **The command is one command group named `/mloader`.** The default command name matches `^[a-z][a-z0-9_-]*$`. An invalid configured name is a warning and the command is not registered. A user input error in the handler becomes a `{ kind: 'error' }` command result instead of a thrown exception.
-- **The command forms are fixed.** `/mloader` and `/mloader status` list every known plugin through the shared formatter. `/mloader <id>` renders a detail block with `Plugin <id>:`, `Name:`, `Version:`, `Backend:`, `State: <state> (loaded|not loaded)`, `Tools:` (or `none`), `Events:` (or `none`), `Commands:` (or `none`), `Registrations:` and, when present, an `Error:` line. `/mloader load <id>`, `/mloader unload <id>` and `/mloader reload <id>` request the lifecycle transition; loading an already loaded plugin and unloading a plugin that is not loaded succeed with a short message and do not call the manager. Unknown ids return `Unknown plugin "<id>".`; `help`, malformed input and a missing id return the usage text. The reserved words `status`, `help`, `load`, `unload` and `reload` win over a plugin id of the same name.
+- **The command forms are fixed.** `/mloader` and `/mloader status` list every known plugin through the shared formatter. `/mloader <id>` renders a detail block with `Plugin <id>:`, `Name:`, `Version:`, `Backend:`, `State: <state> (loaded|not loaded)`, `Tools:` (or `none`), `Events:` (or `none`), `Commands:` (or `none`), `Registrations:` and, when present, an `Error:` line. `/mloader load <id>`, `/mloader unload <id>` and `/mloader reload <id>` request the lifecycle transition; loading an already loaded plugin and unloading a plugin that is not loaded succeed with a short message and do not call the manager. Unknown ids return `Unknown plugin "<id>".`; `help`, malformed input and a missing id return the usage text. `/mloader install <file> ...` installs package archives and reports one line per package; `/mloader ok` and `/mloader confirm` install the pending paths with the confirmation flag, and a repeat of the same install input does the same. The reserved words `status`, `help`, `load`, `unload`, `reload`, `install`, `ok` and `confirm` win over a plugin id of the same name.
+- **The archive reader is the installation boundary.** `installer/zip.ts` reads the central directory instead of trusting a streaming reader, verifies the CRC of every entry when it is read, and supports stored, deflated and prepended-data archives. ZIP64, multi disk and encrypted entries are rejected, and `installer/package.ts` rejects absolute names, traversal, backslashes, symbolic links, case-insensitive duplicates and archives above 4096 entries or 512 MiB unpacked before anything is written. A shipped `.mloader.index.json` is verified against the archive bytes before extraction.
+- **The install swap is staged and reversible.** A WebAssembly package extracts into a staging directory under `<profile>/mloader`, writes its index there, and renames into place on the same file system after the previous directory moved to the trash. A failed rename restores the trashed directory and removes the staging directory, so a rejected package leaves the previous installation and no partial plugin directory behind.
+- **The Python delegation runs without a shell.** `installer/install.ts` spawns the configured interpreter with an argument array, the console PATH and a five minute deadline, captures at most 64 KiB of each stream, and parses the last JSON line of stdout. Warnings from the command line result are merged into the install summary; a non zero exit or a timeout becomes a failed package and the batch continues.
 - **The list output format is fixed by the formatter.** No plugins renders `No external plugins are managed by dsh-mloader.` A list starts with `<n> external plugin(s):` followed by a blank line, then one line per plugin in the form `- <id> (<backend>, <state>)`. Each group with entries is appended after one space, tools first as `tools=[a, b]`, then events as `events=[x, y]`, then commands as `commands=[c, d]`, so a plugin with none ends at the closing parenthesis and a plugin with only events appends one group. A plugin error appears on the line below, indented by two spaces, as `error: <message>`.
 - **`ctx.provide('mloader', ...)` exposes `list`, `enable`, `disable`, `setEnabled`, `reload` and `unload`** for the operator surfaces and for tests. dsh itself does not need it, and it is not part of the external plugin contract. The structural context type does not promise `provide`, so the call is guarded.
 

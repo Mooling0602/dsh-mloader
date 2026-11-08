@@ -4,9 +4,9 @@ English | [简体中文](Package.zh.md)
 
 This document specifies the layout of a dsh-mloader Python plugin package. The archive container, extraction safety, install index, updates, removal, version compatibility and the shared limits are specified in [Package](../Package.md). This document adds the Python-specific layout and build rules.
 
-Status: the Python runtime command line implements this document. The loader does not install a plugin from an archive; it reads a plugin directory under a plugin root. The command line specified in section 6 packs a directory and installs a package into the profile, so a packager and the loader agree on one form.
+Status: the Python runtime command line implements this document. The loader does not install a plugin from an archive at load time; it reads a plugin directory under a plugin root. The command line specified in section 6 packs a directory and installs a package into the profile, and the loader's `/mloader install` command delegates a Python package to it, so a packager and the loader agree on one form.
 
-A Python package holds one manifest and the Python code that manifest names. The manifest sets `"backend": "python"` and names the entry file with `entry`. The loader extracts the archive before it loads anything, so the archive is a transport format and never the directory the plugin runs from.
+A Python package holds one manifest and the Python code that manifest names. The manifest sets `"backend": "python"` and names the entry file with `entry`. The installer extracts the archive before the loader loads anything, so the archive is a transport format and never the directory the plugin runs from.
 
 ## 1. Package contents
 
@@ -195,6 +195,8 @@ Pass `--profile` because the command line runs outside dsh and more than one pro
 `remove` and an update move the previous directory to the platform trash, or under `$TMPDIR` when the platform provides none.
 
 The loader never runs `pack` or `install` on its own. It runs `env sync` before starting a Python plugin, and reads the plugin directories that are already installed.
+
+In a running dsh, the loader's `/mloader install` command accepts the same archives. It detects the backend from the manifest, delegates a Python package to this command line, and installs it under `<profile>/mloader/plugins`. The confirmation flags of this command line map to the command's own confirmation: run `/mloader ok`, `/mloader confirm`, or the same command again.
 
 ## 7. Python-specific limits
 

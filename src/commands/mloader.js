@@ -19,7 +19,16 @@ export const COMMAND_NAME_PATTERN = /^[a-z][a-z0-9_-]*$/u;
 /** Default command name. The command group uses the bare loader name. */
 export const DEFAULT_COMMAND_NAME = 'mloader';
 /** Words that name a command form and therefore never select a plugin by id. */
-const RESERVED_WORDS = new Set(['status', 'help', 'load', 'unload', 'reload']);
+const RESERVED_WORDS = new Set([
+    'status',
+    'help',
+    'load',
+    'unload',
+    'reload',
+    'install',
+    'ok',
+    'confirm',
+]);
 /** Return true when a plugin holds a running backend. */
 function isLoaded(state) {
     return state === 'applied' || state === 'loaded';
@@ -56,14 +65,16 @@ function renderState(plugin) {
 /** Render the usage text for every accepted form. */
 function renderUsage(commandName) {
     return [
-        `Usage: /${commandName} [status | <id> | load <id> | unload <id> | reload <id>]`,
+        `Usage: /${commandName} [status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | ok | confirm]`,
         '',
         'Forms:',
-        '  status        List every external plugin.',
-        '  <id>          Show details for one plugin.',
-        '  load <id>     Load a plugin that is not loaded.',
-        '  unload <id>   Unload a plugin that is loaded.',
-        '  reload <id>   Reload a plugin, loading it first when it is not loaded.',
+        '  status          List every external plugin.',
+        '  <id>            Show details for one plugin.',
+        '  load <id>       Load a plugin that is not loaded.',
+        '  unload <id>     Unload a plugin that is loaded.',
+        '  reload <id>     Reload a plugin, loading it first when it is not loaded.',
+        '  install <file>  Install one or more plugin packages.',
+        '  ok, confirm     Confirm the pending installation.',
     ].join('\n');
 }
 /** Return the error result for an id that is not in the current snapshot list. */
@@ -146,36 +157,176 @@ export async function runMloaderAction(target, action, id) {
         case 'reload': return await reloadPlugin(target, id);
     }
 }
+/** Split command input into tokens, honouring single and double quotes. */
+function tokenize(input) {
+    const tokens = [];
+    let current = '';
+    let started = false;
+    let quote;
+    for (const character of input) {
+        if (quote !== undefined) {
+            if (character === quote) {
+                quote = undefined;
+            }
+            else {
+                current += character;
+            }
+            continue;
+        }
+        if (character === "'" || character === '"') {
+            quote = character;
+            started = true;
+            continue;
+        }
+        if (/\s/u.test(character)) {
+            if (started)
+                tokens.push(current);
+            started = false;
+            current = '';
+            continue;
+        }
+        current += character;
+        started = true;
+    }
+    if (quote !== undefined) {
+        throw new Error(`unterminated ${quote === "'" ? 'single' : 'double'} quote`);
+    }
+    if (started)
+        tokens.push(current);
+    return tokens;
+}
+/** Run one install batch, reload loaded plugins and render the summary. */
+async function executeInstall(target, paths, force) {
+    if (typeof target.install !== 'function') {
+        return {
+            result: {
+                kind: 'error',
+                text: 'Package installation is unavailable: the profile plugin directory was not detected.',
+            },
+            results: [],
+        };
+    }
+    let results;
+    try {
+        results = await target.install(paths, { force });
+    }
+    catch (error) {
+        return { result: { kind: 'error', text: messageOf(error) }, results: [] };
+    }
+    const installed = results.filter((item) => item.status === 'installed' || item.status === 'updated');
+    const pending = results.filter((item) => item.status === 'needs-confirmation');
+    const failed = results.filter((item) => item.status === 'failed');
+    const lines = [];
+    if (installed.length > 0) {
+        lines.push(`${installed.length} package(s) installed:`);
+        for (const item of installed) {
+            const id = item.id ?? item.path;
+            const version = item.version === undefined ? '' : ` ${item.version}`;
+            lines.push(`  ${item.status} ${id}${version} (${item.backend ?? 'unknown'}) at ${item.directory ?? 'unknown directory'}`);
+        }
+    }
+    if (pending.length > 0) {
+        lines.push(`${pending.length} package(s) need confirmation:`);
+        for (const item of pending)
+            lines.push(`  ${item.path}: ${item.message ?? 'confirmation required'}`);
+        lines.push('Run /mloader ok to confirm, or run the same command again.');
+    }
+    if (failed.length > 0) {
+        lines.push(`${failed.length} package(s) failed:`);
+        for (const item of failed)
+            lines.push(`  ${item.path}: ${item.message ?? 'installation failed'}`);
+    }
+    for (const item of installed) {
+        if (item.id === undefined)
+            continue;
+        const known = target.list().find((plugin) => plugin.id === item.id);
+        if (known === undefined || !isLoaded(known.state))
+            continue;
+        try {
+            await target.reload(item.id);
+            lines.push(`reloaded ${item.id}.`);
+        }
+        catch (error) {
+            lines.push(`warning: reload of ${item.id} failed: ${messageOf(error)}`);
+        }
+    }
+    for (const warning of new Set(results.flatMap((item) => item.warnings))) {
+        lines.push(`warning: ${warning}`);
+    }
+    if (lines.length === 0)
+        lines.push('No package was installed.');
+    return {
+        result: {
+            kind: failed.length > 0 || pending.length > 0 ? 'error' : 'success',
+            text: lines.join('\n'),
+        },
+        results,
+    };
+}
 /**
  * Dispatch one invocation.
  *
  * The input is the text after the command name. Unknown or malformed input
  * returns the usage text; a bare token that is not a reserved word selects one
  * plugin, so a plugin may not be addressed by a name the parser claims first.
+ * An install batch that needs confirmation is remembered so that `ok`,
+ * `confirm` or a re-run of the same input can complete it.
  */
-async function dispatch(target, commandName, rawInput) {
-    const tokens = rawInput.trim().split(/\s+/).filter((token) => token.length > 0);
+async function dispatch(target, commandName, rawInput, state) {
+    const input = rawInput.trim();
+    let tokens;
+    try {
+        tokens = tokenize(input);
+    }
+    catch (error) {
+        return { kind: 'error', text: messageOf(error) };
+    }
     if (tokens.length === 0) {
         return { kind: 'success', text: format({ plugins: target.list() }) };
     }
+    const first = tokens[0];
+    if (first === 'install') {
+        const paths = tokens.slice(1);
+        if (paths.length === 0) {
+            return { kind: 'error', text: `Usage: /${commandName} install <file> [<file> ...]` };
+        }
+        if (state.pending !== undefined && state.pending.rawInput === input) {
+            const pending = state.pending;
+            state.pending = undefined;
+            return (await executeInstall(target, pending.paths, true)).result;
+        }
+        const execution = await executeInstall(target, paths, false);
+        const needs = execution.results
+            .filter((item) => item.status === 'needs-confirmation')
+            .map((item) => item.path);
+        state.pending = needs.length > 0 ? { rawInput: input, paths: needs } : undefined;
+        return execution.result;
+    }
+    if (first === 'ok' || first === 'confirm') {
+        if (tokens.length !== 1)
+            return { kind: 'error', text: renderUsage(commandName) };
+        if (state.pending === undefined)
+            return { kind: 'error', text: 'Nothing to confirm.' };
+        const pending = state.pending;
+        state.pending = undefined;
+        return (await executeInstall(target, pending.paths, true)).result;
+    }
     if (tokens.length === 1) {
-        const word = tokens[0];
-        if (word === 'status') {
+        if (first === 'status') {
             return { kind: 'success', text: format({ plugins: target.list() }) };
         }
-        if (word === 'help') {
+        if (first === 'help') {
             return { kind: 'success', text: renderUsage(commandName) };
         }
-        if (RESERVED_WORDS.has(word)) {
+        if (RESERVED_WORDS.has(first)) {
             return { kind: 'error', text: renderUsage(commandName) };
         }
-        return await runMloaderAction(target, 'info', word);
+        return await runMloaderAction(target, 'info', first);
     }
     if (tokens.length === 2) {
-        const word = tokens[0];
         const id = tokens[1];
-        if (word === 'load' || word === 'unload' || word === 'reload') {
-            return await runMloaderAction(target, word, id);
+        if (first === 'load' || first === 'unload' || first === 'reload') {
+            return await runMloaderAction(target, first, id);
         }
     }
     return { kind: 'error', text: renderUsage(commandName) };
@@ -212,14 +363,15 @@ export function registerMloaderCommand(ctx, target, logger, commandName = DEFAUL
         logger?.warn?.('commands service has no register method; slash command was not registered');
         return undefined;
     }
+    const state = {};
     const dispose = commands.register({
         name: commandName,
-        description: 'Manage the external plugins hosted by dsh-mloader.',
+        description: 'Manage and install the external plugins hosted by dsh-mloader.',
         input: {
-            hint: '[status | <id> | load <id> | unload <id> | reload <id>]',
+            hint: '[status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | ok | confirm]',
         },
         async handler(invocation) {
-            return await dispatch(target, commandName, invocation?.rawInput ?? '');
+            return await dispatch(target, commandName, invocation?.rawInput ?? '', state);
         },
     });
     logger?.debug?.(`registered slash command /${commandName}`);

@@ -55,6 +55,8 @@ Each plugin lives in its own directory under the profile:
 
 A plugin directory contains a `mloader.plugin.json` manifest and its entry file. Copy the directory in while dsh runs: the loader watches the plugin roots, so a directory that appears is mounted and one that is deleted is unmounted, both without a restart. After editing the files of an installed plugin, run `/mloader reload <plugin-id>`. The loader finds the current profile through dsh, so no path configuration is needed. Python plugins need Python 3.10 or later. The WASM backend is disabled by default; see [CONTEXT](CONTEXT.md) to enable it. Watching is on by default; see [Configuration](#configuration) to turn it off, and a plugin added to the directory then needs a restart.
 
+The loader can also install a package archive for you. While dsh runs, `/mloader install ./plugin.mloader.pack` accepts one or more archives, installs each into `<profile>/mloader/plugins` and lets the loader mount the result. The command detects the backend from the manifest: a WebAssembly package is installed by the loader itself, and a Python package is handed to the Python SDK command line. It refuses the reserved example id and reloads a plugin that was already loaded. If the archive is already installed or its installed files were edited, the command asks for a second confirmation: run `/mloader ok`, `/mloader confirm`, or run the same command again.
+
 ## Python dependencies
 
 All Python plugins of a profile share one virtual environment at `~/.dsh/profiles/<profile>/mloader/.venv`. The loader normally creates it with uv on the first Python plugin and starts each plugin with that environment. Declare third party packages in `pyproject.toml` under `[project].dependencies`; a `requirements.txt` is also accepted. When both files are present, pyproject wins for a package both name, and the requirements only entries are merged into the installed pyproject. A plugin that ships only `requirements.txt` uses Python's venv module and pip instead, with a warning. Python version selection and per-plugin environments are not supported, so plugins share one dependency set.
@@ -71,7 +73,7 @@ The command derives the profile from the environment path. [Python package](docs
 
 ## WebAssembly example
 
-The repository ships two examples under `seeds/`. `hello-mloader` is the complete Python example that a profile receives automatically. `wasm-mloader` is a source-only Rust example; the loader never releases it, and no compiled `.wasm` file is committed. Build it with `./seeds/wasm-mloader/build.sh`, copy the generated `dist/wasm-mloader` directory into the profile plugin root, and enable `wasm.enabled`. The build requirements and the example contract are in [seeds/wasm-mloader](seeds/wasm-mloader/README.md).
+The repository ships two examples under `seeds/`. `hello-mloader` is the complete Python example that a profile receives automatically. `wasm-mloader` is a source-only Rust example; the loader never releases it, and no compiled `.wasm` file is committed. Build it with `./seeds/wasm-mloader/build.sh`, then copy the generated `dist/wasm-mloader` directory into the profile plugin root, or zip that directory and install the archive with `/mloader install`, and enable `wasm.enabled`. The build requirements and the example contract are in [seeds/wasm-mloader](seeds/wasm-mloader/README.md).
 
 ## Inspect and switch plugins
 
@@ -82,7 +84,7 @@ Two surfaces read the same snapshot:
 | You | the `/mloader` command |
 | The model | `mloader_status`, `mloader_info`, `mloader_load`, `mloader_unload`, and `mloader_reload` tools |
 
-`/mloader` lists every plugin, `/mloader <plugin-id>` shows one, and `/mloader load <plugin-id>`, `/mloader unload <plugin-id>` and `/mloader reload <plugin-id>` change one at runtime. Loading only works for a plugin that is already installed under the profile.
+`/mloader` lists every plugin, `/mloader <plugin-id>` shows one, and `/mloader load <plugin-id>`, `/mloader unload <plugin-id>` and `/mloader reload <plugin-id>` change one at runtime. `/mloader install <file> ...` installs package archives, and `/mloader ok` or `/mloader confirm` completes a pending installation. Loading only works for a plugin that is already installed under the profile.
 
 A hosted plugin can also register slash commands of its own. The bundled example registers `/hello-mloader` and `/hello-add`, the command form of its `hello_add` tool. Tools and commands are separate registrations: a plugin decides which surface its users need, and the loader never mirrors one into the other. Plugin commands share one global namespace with dsh and the other plugins: a plugin declares candidate names in priority order, and the loader registers the first name that is not taken. When every candidate is taken, the existing command wins and the plugin keeps loading without that command.
 
@@ -125,7 +127,7 @@ The shape of each value, the bytecode cache trade-off and the restart checklist 
 - [docs/ABI-unified](docs/ABI-unified.md): the shared contract for third-party plugin authors, including the manifest schema, the capability whitelist, the RPC protocol, the lifecycle, the backend interface, the security model and the installation layout.
 - [docs/python-sdk/PyABI](docs/python-sdk/PyABI.md): the Python backend contract, including the SDK import, the two registration styles, result schema inference and the process transport.
 - [docs/wasm/WasmABI](docs/wasm/WasmABI.md): the WebAssembly core ABI, including the required exports, the declaration object and the worker deadlines.
-- [docs/Package](docs/Package.md): the archive format and installation rules shared by both backends. The Python backend implements them; the WebAssembly package format is fixed but has no installer yet.
+- [docs/Package](docs/Package.md): the archive format and installation rules shared by both backends. The `/mloader install` command implements them for WebAssembly and delegates Python packages to the Python command line.
 - [docs/python-sdk/Package](docs/python-sdk/Package.md): the Python package layout, dependencies, shared environment and command line.
 - [docs/wasm/Package](docs/wasm/Package.md): the WebAssembly package layout, one manifest and one portable `.wasm` entry.
 - [CONTEXT](CONTEXT.md): technical detail for maintainers, including the build and artifact policy, configuration defaults, test recipes and the restart checklist.
