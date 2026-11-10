@@ -842,6 +842,7 @@ export async function apply(ctx, config = {}) {
         reload: (id) => manager.reload(id),
         ...installer === undefined ? {} : {
             install: (paths, options) => installer.install(paths, options),
+            remove: (id, options) => installer.remove(id, options),
         },
     };
     if (settings.statusTool !== false) {

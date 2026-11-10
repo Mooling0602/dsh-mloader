@@ -96,7 +96,13 @@ When the installed index carries `fileMd5`, the loader verifies the files on dis
 
 ### 4.3 Removal
 
-A plugin is removed by deleting its directory under `mloader/plugins`, or by moving it to the trash. The loader offers the same operation and asks for a second confirmation first. The Python command line expresses that confirmation as `--yes`. Removing a plugin never touches the archive it was installed from, so the same archive installs it again.
+A plugin is removed by deleting its directory under `mloader/plugins`, or by moving it to the trash. The loader offers the same operation as `/mloader uninstall <id>` and moves the directory to the trash, so a removal is recoverable in the same window an update uses. Removing a plugin never touches the archive it was installed from, so the same archive installs it again.
+
+A loaded plugin is unloaded before its directory moves, because a running Python interpreter holds files inside that directory. A plugin whose id is not currently discovered can still be removed, since a broken installation is exactly the case where the operator needs the command.
+
+The removal asks for a second confirmation in two situations, and `--force` skips it. The first is a directory that carries no install index: nothing records where it came from, so the loader cannot tell a hand-placed plugin from a leftover. The second is an installation whose files no longer match the index, which means the operator edited them after installation, so removing it would discard that work. The confirmation names the edited files.
+
+The Python command line expresses the same two confirmations as `--yes`.
 
 ## 5. Version compatibility
 

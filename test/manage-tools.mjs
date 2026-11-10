@@ -29,14 +29,26 @@ function targetFixture() {
 test('management tools preserve slash command output and lifecycle decisions', async () => {
   const target = targetFixture()
   const tools = Object.fromEntries(createManagementTools(target).map((tool) => [tool.name, tool]))
-  assert.deepEqual(Object.keys(tools), ['mloader_info', 'mloader_load', 'mloader_unload', 'mloader_reload'])
+  assert.deepEqual(Object.keys(tools), [
+    'mloader_info',
+    'mloader_load',
+    'mloader_unload',
+    'mloader_reload',
+    'mloader_uninstall',
+  ])
   for (const tool of Object.values(tools)) {
     assert.deepEqual(tool.parameters.required, ['id'])
     assert.equal(tool.parameters.additionalProperties, false)
     assert.deepEqual(tool.output.render({}, { text: 'example' }), [{ type: 'text', text: 'example' }])
     await assert.rejects(tool.execute({}), /non-empty plugin identifier/)
-    await assert.rejects(tool.execute({ id: 'missing' }), /Unknown plugin "missing"/)
   }
+  // Uninstall is deliberately not gated on the discovered plugin set: a broken
+  // installation is exactly the case where an operator needs to remove it. The
+  // fixture has no plugin directory, so the tool reports that instead.
+  for (const name of ['mloader_info', 'mloader_load', 'mloader_unload', 'mloader_reload']) {
+    await assert.rejects(tools[name].execute({ id: 'missing' }), /Unknown plugin "missing"/)
+  }
+  await assert.rejects(tools.mloader_uninstall.execute({ id: 'missing' }), /removal is unavailable/)
   const info = await tools.mloader_info.execute({ id: 'example' })
   assert.equal(info.text, (await runMloaderAction(target, 'info', 'example')).text)
   assert.match(info.text, /Version: 1\.0\.0/)
@@ -94,7 +106,14 @@ test('statusTool enables management tools independently of command and disposes 
       roots: [root], profilePlugins: false, seedExamples: false, console: false,
       watch: false, statusTool: true, command: false,
     })
-    assert.deepEqual([...tools.keys()].sort(), ['mloader_info', 'mloader_load', 'mloader_reload', 'mloader_status', 'mloader_unload'])
+    assert.deepEqual([...tools.keys()].sort(), [
+      'mloader_info',
+      'mloader_load',
+      'mloader_reload',
+      'mloader_status',
+      'mloader_uninstall',
+      'mloader_unload',
+    ])
     const deadline = Date.now() + 10000
     while (manager.list().find((plugin) => plugin.id === 'example')?.state !== 'applied') {
       if (Date.now() > deadline) throw new Error('plugin did not start')

@@ -26,7 +26,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, join, resolve, sep } from 'node:path'
-import { expandHome } from '../contract.js'
+import { expandHome, isValidPluginId } from '../contract.js'
 import { PYTHON_CLI_SCRIPT } from '../python-env.js'
 import { withShellPath } from '../shell-path.js'
 import type { BackendKind, LoaderLogger } from '../types.js'
@@ -129,12 +129,36 @@ export interface InstallCallOptions {
   force?: boolean
 }
 
+/** Outcome of removing one installed plugin. */
+export interface RemoveResult {
+  /** Plugin id as it was asked for. */
+  id: string
+  /** What happened to the plugin. */
+  status: 'removed' | 'needs-confirmation' | 'failed'
+  /** Installed directory the removal applied to, when it was resolved. */
+  directory?: string
+  /** Where the directory went, when the removal succeeded. */
+  trash?: string
+  /** Files the operator changed after installation, when the check ran. */
+  changed?: string[]
+  /** Failure reason, or the confirmation reason of a pending removal. */
+  message?: string
+}
+
+/** Options of one remove call. */
+export interface RemoveCallOptions {
+  /** Remove even when the installation was edited after it was installed. */
+  force?: boolean
+}
+
 /** Installer the command group calls. */
 export interface PackageInstaller {
   /** Install several packages sequentially, continuing after a failure. */
   install(paths: string[], options?: InstallCallOptions): Promise<InstallResult[]>
   /** Install one package. */
   installOne(path: string, options?: InstallCallOptions): Promise<InstallResult>
+  /** Remove one installed plugin, moving its directory to the trash. */
+  remove(id: string, options?: RemoveCallOptions): Promise<RemoveResult>
 }
 
 /** The resolved state of a target directory before installing. */
@@ -554,6 +578,75 @@ export function createPackageInstaller(options: InstallerOptions): PackageInstal
         }
       }
     },
+    async remove(id: string, callOptions: RemoveCallOptions = {}): Promise<RemoveResult> {
+      try {
+        if (pluginsDir === undefined || pluginsDir.length === 0) {
+          throw new PackageError(
+            'the profile plugin directory is unknown; the loader cannot remove a plugin',
+          )
+        }
+        return await removeInstalled(pluginsDir, id, callOptions.force === true)
+      } catch (error) {
+        return { id, status: 'failed', message: messageOf(error) }
+      }
+    },
   }
   return installer
+}
+
+/**
+ * Remove one installed plugin directory after checking what the operator owns.
+ *
+ * The install index records the checksum of every file the package provided, so
+ * a file that no longer matches was edited after installation and belongs to the
+ * operator. Replacing that directory without saying so would discard the edit
+ * silently, which is why an edited installation needs the same second
+ * confirmation an update needs. A directory without an index was placed by hand,
+ * so nothing records its provenance and the removal asks as well.
+ *
+ * @param pluginsDir - Absolute profile plugin directory.
+ * @param id - Plugin id, which is also the installed directory name.
+ * @param force - Remove without asking even when the installation was edited.
+ * @returns The removal outcome.
+ * @throws {PackageError} When the id is malformed or the plugin is not installed.
+ */
+async function removeInstalled(pluginsDir: string, id: string, force: boolean): Promise<RemoveResult> {
+  if (!isValidPluginId(id)) {
+    throw new PackageError(`${JSON.stringify(id)} is not a valid plugin id`)
+  }
+  const target = join(pluginsDir, id)
+  let info
+  try {
+    info = await lstat(target)
+  } catch {
+    throw new PackageError(`plugin "${id}" is not installed at ${target}`)
+  }
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new PackageError(`${target} is not a plugin directory`)
+  }
+
+  const index = await readInstallIndex(target)
+  const changed = index === undefined ? [] : await changedFiles(target, index.fileMd5)
+  if (!force) {
+    if (index === undefined) {
+      return {
+        id,
+        status: 'needs-confirmation',
+        directory: target,
+        message: `${target} carries no install index`,
+      }
+    }
+    if (changed.length > 0) {
+      return {
+        id,
+        status: 'needs-confirmation',
+        directory: target,
+        changed,
+        message: `${changed.length} file(s) were edited after installation: ${changed.join(', ')}`,
+      }
+    }
+  }
+
+  const trash = await moveToTrash(target)
+  return { id, status: 'removed', directory: target, trash, ...(changed.length > 0 ? { changed } : {}) }
 }

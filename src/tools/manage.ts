@@ -10,6 +10,7 @@ const DESCRIPTIONS: Record<MloaderAction, string> = {
   load: 'Load one external plugin hosted by dsh-mloader. The change lasts until the loader restarts.',
   unload: 'Unload one external plugin hosted by dsh-mloader. The change lasts until the loader restarts.',
   reload: 'Reload one external plugin hosted by dsh-mloader, or load it if it is not loaded.',
+  uninstall: 'Uninstall one external plugin hosted by dsh-mloader, moving its directory to the trash.',
 }
 
 /**
@@ -22,7 +23,7 @@ const DESCRIPTIONS: Record<MloaderAction, string> = {
  * @returns Tool definitions ready for registration on the loader context.
  */
 export function createManagementTools(target: MloaderCommandTarget): ToolDefinition[] {
-  const actions: MloaderAction[] = ['info', 'load', 'unload', 'reload']
+  const actions: MloaderAction[] = ['info', 'load', 'unload', 'reload', 'uninstall']
   return actions.map((action) => ({
     name: `mloader_${action}`,
     description: DESCRIPTIONS[action],

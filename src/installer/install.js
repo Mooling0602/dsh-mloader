@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile, } from 'node:fs/promises';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { expandHome } from '../contract.js';
+import { expandHome, isValidPluginId } from '../contract.js';
 import { PYTHON_CLI_SCRIPT } from '../python-env.js';
 import { withShellPath } from '../shell-path.js';
 import { INDEX_NAME, INDEX_SCHEMA_VERSION, MANIFEST_NAME, openPackage, PackageError, } from './package.js';
@@ -416,6 +416,72 @@ export function createPackageInstaller(options) {
                 };
             }
         },
+        async remove(id, callOptions = {}) {
+            try {
+                if (pluginsDir === undefined || pluginsDir.length === 0) {
+                    throw new PackageError('the profile plugin directory is unknown; the loader cannot remove a plugin');
+                }
+                return await removeInstalled(pluginsDir, id, callOptions.force === true);
+            }
+            catch (error) {
+                return { id, status: 'failed', message: messageOf(error) };
+            }
+        },
     };
     return installer;
+}
+/**
+ * Remove one installed plugin directory after checking what the operator owns.
+ *
+ * The install index records the checksum of every file the package provided, so
+ * a file that no longer matches was edited after installation and belongs to the
+ * operator. Replacing that directory without saying so would discard the edit
+ * silently, which is why an edited installation needs the same second
+ * confirmation an update needs. A directory without an index was placed by hand,
+ * so nothing records its provenance and the removal asks as well.
+ *
+ * @param pluginsDir - Absolute profile plugin directory.
+ * @param id - Plugin id, which is also the installed directory name.
+ * @param force - Remove without asking even when the installation was edited.
+ * @returns The removal outcome.
+ * @throws {PackageError} When the id is malformed or the plugin is not installed.
+ */
+async function removeInstalled(pluginsDir, id, force) {
+    if (!isValidPluginId(id)) {
+        throw new PackageError(`${JSON.stringify(id)} is not a valid plugin id`);
+    }
+    const target = join(pluginsDir, id);
+    let info;
+    try {
+        info = await lstat(target);
+    }
+    catch {
+        throw new PackageError(`plugin "${id}" is not installed at ${target}`);
+    }
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+        throw new PackageError(`${target} is not a plugin directory`);
+    }
+    const index = await readInstallIndex(target);
+    const changed = index === undefined ? [] : await changedFiles(target, index.fileMd5);
+    if (!force) {
+        if (index === undefined) {
+            return {
+                id,
+                status: 'needs-confirmation',
+                directory: target,
+                message: `${target} carries no install index`,
+            };
+        }
+        if (changed.length > 0) {
+            return {
+                id,
+                status: 'needs-confirmation',
+                directory: target,
+                changed,
+                message: `${changed.length} file(s) were edited after installation: ${changed.join(', ')}`,
+            };
+        }
+    }
+    const trash = await moveToTrash(target);
+    return { id, status: 'removed', directory: target, trash, ...(changed.length > 0 ? { changed } : {}) };
 }

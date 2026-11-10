@@ -14,7 +14,7 @@
  * @module commands/mloader
  */
 
-import type { InstallResult } from '../installer/install.js'
+import type { InstallResult, RemoveResult } from '../installer/install.js'
 import { format } from '../tools/status.js'
 import type {
   Disposer,
@@ -53,6 +53,11 @@ export interface MloaderCommandTarget {
    * the profile plugin directory.
    */
   install?(paths: string[], options: { force: boolean }): Promise<InstallResult[]>
+  /**
+   * Remove one installed plugin. Absent when the loader cannot resolve the
+   * profile plugin directory.
+   */
+  remove?(id: string, options: { force: boolean }): Promise<RemoveResult>
 }
 
 /** Result of one command invocation, as the commands service expects it. */
@@ -82,6 +87,8 @@ const RESERVED_WORDS = new Set([
   'unload',
   'reload',
   'install',
+  'uninstall',
+  'remove',
   'ok',
   'confirm',
 ])
@@ -94,10 +101,18 @@ interface PendingInstall {
   paths: string[]
 }
 
+/** One removal waiting for the operator's second confirmation. */
+interface PendingRemoval {
+  /** Plugin id the operator asked to remove. */
+  id: string
+}
+
 /** Mutable state of one registered command, kept across invocations. */
 interface CommandState {
   /** The batch waiting for confirmation, when one exists. */
   pending?: PendingInstall
+  /** The removal waiting for confirmation, when one exists. */
+  pendingRemoval?: PendingRemoval
 }
 
 /** Return true when a plugin holds a running backend. */
@@ -139,16 +154,17 @@ function renderState(plugin: PluginSnapshot): string {
 /** Render the usage text for every accepted form. */
 function renderUsage(commandName: string): string {
   return [
-    `Usage: /${commandName} [status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | ok | confirm]`,
+    `Usage: /${commandName} [status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | uninstall <id> | ok | confirm]`,
     '',
     'Forms:',
-    '  status          List every external plugin.',
-    '  <id>            Show details for one plugin.',
-    '  load <id>       Load a plugin that is not loaded.',
-    '  unload <id>     Unload a plugin that is loaded.',
-    '  reload <id>     Reload a plugin, loading it first when it is not loaded.',
-    '  install <file>  Install one or more plugin packages.',
-    '  ok, confirm     Confirm the pending installation.',
+    '  status            List every external plugin.',
+    '  <id>              Show details for one plugin.',
+    '  load <id>         Load a plugin that is not loaded.',
+    '  unload <id>       Unload a plugin that is loaded, keeping its files.',
+    '  reload <id>       Reload a plugin, loading it first when it is not loaded.',
+    '  install <file>    Install one or more plugin packages.',
+    '  uninstall <id>    Remove an installed plugin, moving its directory to the trash.',
+    '  ok, confirm       Confirm the operation waiting for confirmation.',
   ].join('\n')
 }
 
@@ -217,7 +233,7 @@ async function reloadPlugin(target: MloaderCommandTarget, id: string): Promise<C
 }
 
 /** Operations that address one plugin. */
-export type MloaderAction = 'info' | 'load' | 'unload' | 'reload'
+export type MloaderAction = 'info' | 'load' | 'unload' | 'reload' | 'uninstall'
 
 /**
  * Run a plugin operation with the same lifecycle and output as the slash command.
@@ -237,6 +253,7 @@ export async function runMloaderAction(
     case 'load': return await loadPlugin(target, id)
     case 'unload': return await unloadPlugin(target, id)
     case 'reload': return await reloadPlugin(target, id)
+    case 'uninstall': return await executeRemove(target, id, false)
   }
 }
 
@@ -355,13 +372,75 @@ async function executeInstall(
 }
 
 /**
+ * Remove one installed plugin, unloading it first when it is loaded.
+ *
+ * The backend is stopped before the directory moves, because the interpreter of
+ * a running Python plugin holds files inside that directory. A plugin that was
+ * never loaded needs no unload, and one whose id is not currently discovered can
+ * still be removed: a broken installation is exactly the case where the operator
+ * needs this command.
+ *
+ * @param target - Plugin snapshots, lifecycle operations and the installer.
+ * @param id - Plugin id to remove.
+ * @param force - Remove even when the installation was edited after installation.
+ * @returns The command result, including the confirmation request and its reason.
+ */
+async function executeRemove(
+  target: MloaderCommandTarget,
+  id: string,
+  force: boolean,
+): Promise<CommandResult> {
+  if (typeof target.remove !== 'function') {
+    return {
+      kind: 'error',
+      text: 'Plugin removal is unavailable: the profile plugin directory was not detected.',
+    }
+  }
+  const known = findPlugin(target, id)
+  if (known !== undefined && isLoaded(known.state)) {
+    try {
+      await target.disable(id)
+    } catch (error) {
+      return { kind: 'error', text: `cannot unload ${id} before removing it: ${messageOf(error)}` }
+    }
+  }
+
+  let result: RemoveResult
+  try {
+    result = await target.remove(id, { force })
+  } catch (error) {
+    return { kind: 'error', text: messageOf(error) }
+  }
+
+  if (result.status === 'needs-confirmation') {
+    return {
+      kind: 'error',
+      text: [
+        `Removing ${id} needs confirmation: ${result.message ?? 'the installation changed'}.`,
+        `Run /mloader uninstall ${id} --force to remove it anyway.`,
+      ].join('\n'),
+    }
+  }
+  if (result.status === 'failed') {
+    return { kind: 'error', text: result.message ?? `could not remove ${id}` }
+  }
+  const changed = result.changed?.length
+    ? `${result.changed.length} edited file(s) went to the trash with it.`
+    : undefined
+  return {
+    kind: 'success',
+    text: [`Removed ${id} to ${result.trash ?? 'the trash'}.`, ...changed === undefined ? [] : [changed]].join('\n'),
+  }
+}
+
+/**
  * Dispatch one invocation.
  *
  * The input is the text after the command name. Unknown or malformed input
  * returns the usage text; a bare token that is not a reserved word selects one
  * plugin, so a plugin may not be addressed by a name the parser claims first.
- * An install batch that needs confirmation is remembered so that `ok`,
- * `confirm` or a re-run of the same input can complete it.
+ * An install batch or a removal that needs confirmation is remembered so that
+ * `ok`, `confirm` or a re-run of the same input can complete it.
  */
 async function dispatch(
   target: MloaderCommandTarget,
@@ -399,8 +478,33 @@ async function dispatch(
     state.pending = needs.length > 0 ? { rawInput: input, paths: needs } : undefined
     return execution.result
   }
+  if (first === 'uninstall' || first === 'remove') {
+    const rest = tokens.slice(1)
+    const id = rest.find((token) => token !== '--force')
+    if (id === undefined) {
+      return { kind: 'error', text: `Usage: /${commandName} uninstall <id> [--force]` }
+    }
+    const force = rest.includes('--force')
+    if (!force && state.pendingRemoval?.id === id) {
+      state.pendingRemoval = undefined
+      return await executeRemove(target, id, false)
+    }
+    const result = await executeRemove(target, id, force)
+    // A removal that the installer agreed to perform was performed, so a
+    // pending entry is cleared either way; only an edit that still needs the
+    // operator's consent keeps one.
+    state.pendingRemoval = result.kind === 'error' && result.text.includes('needs confirmation')
+      ? { id }
+      : undefined
+    return result
+  }
   if (first === 'ok' || first === 'confirm') {
     if (tokens.length !== 1) return { kind: 'error', text: renderUsage(commandName) }
+    const removal = state.pendingRemoval
+    if (removal !== undefined) {
+      state.pendingRemoval = undefined
+      return await executeRemove(target, removal.id, true)
+    }
     if (state.pending === undefined) return { kind: 'error', text: 'Nothing to confirm.' }
     const pending = state.pending
     state.pending = undefined
@@ -472,9 +576,9 @@ export function registerMloaderCommand(
   const state: CommandState = {}
   const dispose = commands.register({
     name: commandName,
-    description: 'Manage and install the external plugins hosted by dsh-mloader.',
+    description: 'Manage, install and remove the external plugins hosted by dsh-mloader.',
     input: {
-      hint: '[status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | ok | confirm]',
+      hint: '[status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | uninstall <id> | ok | confirm]',
     },
     async handler(invocation) {
       return await dispatch(target, commandName, invocation?.rawInput ?? '', state)

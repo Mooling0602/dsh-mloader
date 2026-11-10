@@ -937,6 +937,7 @@ export async function apply(ctx: LoaderContext, config: LoaderConfig = {}): Prom
     reload: (id: string) => manager.reload(id),
     ...installer === undefined ? {} : {
       install: (paths: string[], options: { force: boolean }) => installer.install(paths, options),
+      remove: (id: string, options: { force: boolean }) => installer.remove(id, options),
     },
   }
   if (settings.statusTool !== false) {

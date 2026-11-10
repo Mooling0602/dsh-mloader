@@ -190,13 +190,13 @@ async function main() {
   check('definition name is mloader', definition?.name === 'mloader', definition?.name)
   check(
     'description is the command group description',
-    definition?.description === 'Manage and install the external plugins hosted by dsh-mloader.',
+    definition?.description === 'Manage, install and remove the external plugins hosted by dsh-mloader.',
     definition?.description,
   )
   check(
     'input hint lists every form',
     definition?.input?.hint ===
-      '[status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | ok | confirm]',
+      '[status | <id> | load <id> | unload <id> | reload <id> | install <file> ... | uninstall <id> | ok | confirm]',
     definition?.input?.hint,
   )
 

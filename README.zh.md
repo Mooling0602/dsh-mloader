@@ -82,9 +82,9 @@ dsh-mloader-sdk install ./my-plugin.mloader.pack
 | 谁 | 怎么用 |
 | --- | --- |
 | 你 | `/mloader` 命令 |
-| 模型 | `mloader_status`、`mloader_info`、`mloader_load`、`mloader_unload` 和 `mloader_reload` 工具 |
+| 模型 | `mloader_status`、`mloader_info`、`mloader_load`、`mloader_unload`、`mloader_reload` 和 `mloader_uninstall` 工具 |
 
-`/mloader` 列出全部插件，`/mloader <plugin-id>` 查看单个插件，`/mloader load <plugin-id>`、`/mloader unload <plugin-id>` 和 `/mloader reload <plugin-id>` 在运行时切换插件。`/mloader install <file> ...` 安装插件包，`/mloader ok` 或 `/mloader confirm` 完成待确认的安装。只有已经装在 profile 里的插件才能被加载。
+`/mloader` 列出全部插件，`/mloader <plugin-id>` 查看单个插件，`/mloader load <plugin-id>`、`/mloader unload <plugin-id>` 和 `/mloader reload <plugin-id>` 在运行时切换插件。`/mloader install <file> ...` 安装插件包，`/mloader ok` 或 `/mloader confirm` 完成待确认的安装。`/mloader uninstall <plugin-id>` 卸载插件并把它的目录移到回收站；插件文件在安装后被编辑过时，加上 `--force`。只有已经装在 profile 里的插件才能被加载。
 
 被托管的插件也可以注册自己的斜杠命令。随包示例注册了 `/hello-mloader` 和 `/hello-add`，后者是 `hello_add` 工具的命令形式。工具和命令是彼此独立的注册：插件按需要选择对用户和模型暴露哪一面，加载器不会把一面镜像成另一面。插件命令与 dsh 及其他插件共用一个全局命名空间：插件按优先级声明候选名，加载器注册第一个尚未被占用的名字。所有候选都被占用时，已存在的命令获胜，插件在没有该命令的情况下继续加载。
 

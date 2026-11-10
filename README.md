@@ -82,9 +82,9 @@ Two surfaces read the same snapshot:
 | Who | How |
 | --- | --- |
 | You | the `/mloader` command |
-| The model | `mloader_status`, `mloader_info`, `mloader_load`, `mloader_unload`, and `mloader_reload` tools |
+| The model | `mloader_status`, `mloader_info`, `mloader_load`, `mloader_unload`, `mloader_reload` and `mloader_uninstall` tools |
 
-`/mloader` lists every plugin, `/mloader <plugin-id>` shows one, and `/mloader load <plugin-id>`, `/mloader unload <plugin-id>` and `/mloader reload <plugin-id>` change one at runtime. `/mloader install <file> ...` installs package archives, and `/mloader ok` or `/mloader confirm` completes a pending installation. Loading only works for a plugin that is already installed under the profile.
+`/mloader` lists every plugin, `/mloader <plugin-id>` shows one, and `/mloader load <plugin-id>`, `/mloader unload <plugin-id>` and `/mloader reload <plugin-id>` change one at runtime. `/mloader install <file> ...` installs package archives, and `/mloader ok` or `/mloader confirm` completes a pending installation. `/mloader uninstall <plugin-id>` unloads a plugin and moves its directory to the trash; add `--force` when the plugin's files were edited after installation. Loading only works for a plugin that is already installed under the profile.
 
 A hosted plugin can also register slash commands of its own. The bundled example registers `/hello-mloader` and `/hello-add`, the command form of its `hello_add` tool. Tools and commands are separate registrations: a plugin decides which surface its users need, and the loader never mirrors one into the other. Plugin commands share one global namespace with dsh and the other plugins: a plugin declares candidate names in priority order, and the loader registers the first name that is not taken. When every candidate is taken, the existing command wins and the plugin keeps loading without that command.
 

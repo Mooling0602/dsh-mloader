@@ -72,6 +72,14 @@ function makeTarget(options = {}) {
         : await options.install(paths, callOptions)
     }
   }
+  if (options.withRemove !== false) {
+    target.remove = async (id, callOptions) => {
+      calls.push({ call: 'remove', id, options: callOptions })
+      return options.remove === undefined
+        ? { id, status: 'removed', directory: `/plugins/${id}`, trash: `/trash/${id}` }
+        : await options.remove(id, callOptions)
+    }
+  }
   return { target, calls }
 }
 
@@ -87,6 +95,10 @@ function setup(target, name = 'mloader') {
 }
 
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right)
+
+function removed(id, overrides = {}) {
+  return { id, status: 'removed', directory: `/plugins/${id}`, trash: `/trash/${id}`, ...overrides }
+}
 
 console.log('install forms')
 {
@@ -194,6 +206,79 @@ console.log('summary, reload and failures')
   check('handles an empty installer reply', result.text.includes('No package was installed'))
 }
 
+console.log('uninstall forms')
+{
+  const { target, calls } = makeTarget({ snapshots: [snapshot('plugin-a', 'applied')] })
+  const command = setup(target)
+  const result = await command.handler({ rawInput: 'uninstall plugin-a' })
+  check('removes a loaded plugin', result.kind === 'success', result.text)
+  check('unloads before removing', calls[0]?.call === 'disable', JSON.stringify(calls))
+  check('then removes it', calls[1]?.call === 'remove', JSON.stringify(calls))
+  check('does not force the first attempt', calls[1].options.force === false)
+  check('reports the trash destination', result.text.includes('/trash/plugin-a'), result.text)
+}
+{
+  const { target, calls } = makeTarget({ snapshots: [snapshot('plugin-a', 'discovered')] })
+  const command = setup(target)
+  await command.handler({ rawInput: 'remove plugin-a' })
+  check('a discovered plugin is not unloaded first', calls.every((call) => call.call !== 'disable'),
+    JSON.stringify(calls))
+  check('it is still removed', calls.some((call) => call.call === 'remove'))
+}
+{
+  const { target, calls } = makeTarget({
+    remove: (id, options) => (options.force
+      ? removed(id, { changed: ['plugin.wasm'] })
+      : { id, status: 'needs-confirmation', directory: `/plugins/${id}`, message: '2 file(s) were edited after installation: plugin.wasm' }),
+  })
+  const command = setup(target)
+  const first = await command.handler({ rawInput: 'uninstall plugin-a' })
+  check('an edited installation asks first', first.kind === 'error' && first.text.includes('needs confirmation'), first.text)
+  check('the reason is shown', first.text.includes('edited after installation'), first.text)
+  check('the force form is named', first.text.includes('--force'), first.text)
+  const confirmed = await command.handler({ rawInput: 'ok' })
+  check('ok confirms the pending removal', confirmed.kind === 'success', confirmed.text)
+  check('ok forces the removal', calls.at(-1).options.force === true, JSON.stringify(calls))
+}
+{
+  const { target, calls } = makeTarget({
+    remove: (id) => ({ id, status: 'removed', directory: `/plugins/${id}`, trash: `/trash/${id}`, changed: ['plugin.wasm'] }),
+  })
+  const command = setup(target)
+  const result = await command.handler({ rawInput: 'uninstall plugin-a --force' })
+  check('the force form removes directly', result.kind === 'success', result.text)
+  check('force is passed through', calls[0].options.force === true)
+  check('edited files are reported', result.text.includes('1 edited file'), result.text)
+}
+{
+  const { target } = makeTarget()
+  const command = setup(target)
+  const bare = await command.handler({ rawInput: 'uninstall' })
+  check('a bare uninstall asks for usage', bare.kind === 'error' && bare.text.includes('uninstall <id>'), bare.text)
+}
+{
+  const { target } = makeTarget({
+    remove: (id) => ({ id, status: 'failed', message: `plugin "${id}" is not installed` }),
+  })
+  const command = setup(target)
+  const result = await command.handler({ rawInput: 'uninstall missing' })
+  check('a failed removal reports the reason', result.kind === 'error' && result.text.includes('is not installed'), result.text)
+}
+{
+  const { target } = makeTarget({ snapshots: [snapshot('plugin-a', 'applied')] })
+  delete target.remove
+  const command = setup(target)
+  const result = await command.handler({ rawInput: 'uninstall plugin-a' })
+  check('a missing remove capability is reported', result.kind === 'error' && result.text.includes('unavailable'), result.text)
+}
+{
+  const { target } = makeTarget({ snapshots: [snapshot('plugin-a', 'applied')] })
+  const command = setup(target)
+  await command.handler({ rawInput: 'uninstall plugin-a' })
+  const again = await command.handler({ rawInput: 'ok' })
+  check('a completed removal leaves nothing pending', again.kind === 'error' && again.text.includes('Nothing to confirm'), again.text)
+}
+
 console.log('unchanged forms')
 {
   const { target, calls } = makeTarget({ snapshots: [snapshot('plugin-a', 'discovered')] })
@@ -206,6 +291,7 @@ console.log('unchanged forms')
   const command = setup(target)
   const result = await command.handler({ rawInput: 'help' })
   check('help lists the install form', result.kind === 'success' && result.text.includes('install <file>'))
+  check('help lists the uninstall form', result.kind === 'success' && result.text.includes('uninstall <id>'))
   const bare = await command.handler({ rawInput: 'install' })
   check('a bare install word asks for usage', bare.kind === 'error' && bare.text.includes('Usage:'))
 }

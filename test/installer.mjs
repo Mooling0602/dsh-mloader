@@ -179,6 +179,43 @@ const timeoutInstaller = createPackageInstaller({
 const timedOut = await timeoutInstaller.installOne(pythonArchive)
 check('reports a Python command timeout', timedOut.status === 'failed' && /timed out/u.test(timedOut.message ?? ''))
 
+console.log('removal')
+const removeTarget = join(pluginsDir, 'wasm-demo')
+check('the plugin is installed before removal', await exists(removeTarget))
+const edited = join(removeTarget, 'plugin.wasm')
+await writeFile(edited, Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x02, 0x00, 0x00, 0x00]))
+const pendingRemove = await installer.remove('wasm-demo')
+check('an edited installation needs confirmation', pendingRemove.status === 'needs-confirmation', pendingRemove.message)
+check('the confirmation names the edited file', (pendingRemove.changed ?? []).includes('plugin.wasm'),
+  JSON.stringify(pendingRemove.changed))
+check('nothing was removed yet', await exists(removeTarget))
+const removed = await installer.remove('wasm-demo', { force: true })
+check('a forced removal succeeds', removed.status === 'removed', removed.message)
+check('the directory is gone', !(await exists(removeTarget)))
+check('the removal reports the trash destination', typeof removed.trash === 'string' && removed.trash.length > 0)
+check('the trash holds the removed directory', await exists(removed.trash))
+const missingRemove = await installer.remove('wasm-demo')
+check('removing a plugin that is not installed fails', missingRemove.status === 'failed', missingRemove.message)
+check('the failure names the id', /not installed/u.test(missingRemove.message ?? ''))
+const badId = await installer.remove('../escape')
+check('removing an invalid id fails', badId.status === 'failed', badId.message)
+check('the invalid id failure is explicit', /not a valid plugin id/u.test(badId.message ?? ''))
+
+const handPlaced = join(pluginsDir, 'hand-placed')
+await mkdir(handPlaced, { recursive: true })
+await writeFile(join(handPlaced, 'mloader.plugin.json'), JSON.stringify(manifestOf('hand-placed')))
+const noIndex = await installer.remove('hand-placed')
+check('a hand-placed directory needs confirmation', noIndex.status === 'needs-confirmation', noIndex.message)
+check('the reason names the missing index', /no install index/u.test(noIndex.message ?? ''))
+const removedHandPlaced = await installer.remove('hand-placed', { force: true })
+check('a hand-placed directory removes with force', removedHandPlaced.status === 'removed', removedHandPlaced.message)
+check('the hand-placed directory is gone', !(await exists(handPlaced)))
+
+const profilelessInstaller = createPackageInstaller({ pythonBin: 'python3' })
+const profilelessRemove = await profilelessInstaller.remove('anything')
+check('removal without a profile directory fails', profilelessRemove.status === 'failed', profilelessRemove.message)
+check('the failure names the missing directory', /plugin directory is unknown/u.test(profilelessRemove.message ?? ''))
+
 await cleanup(root)
 
 if (failures.length > 0) {
