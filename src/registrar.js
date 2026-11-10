@@ -14,6 +14,23 @@ import { COMMAND_NAME_PATTERN, EVENT_WHITELIST, PLUGIN_STATE, validateToolSchema
 /** Logger method names reachable through the one-way `logger.log` operation. */
 const LOG_LEVELS = ['debug', 'info', 'warn', 'error'];
 /**
+ * Capability switch that governs each registration operation.
+ *
+ * The manifest `capabilities` object is the plugin's own declaration of what it
+ * may use, so it is enforced here, at the one place every registration passes
+ * through, rather than at each backend. Reading it at the channel keeps the
+ * Python backend and the WebAssembly declaration path under the same rule: a
+ * WebAssembly module returns its declarations as the apply result, and the
+ * loader feeds them through this method.
+ */
+const OPERATION_CAPABILITY = {
+    'tools.register': 'tools',
+    'commands.register': 'commands',
+    'events.on': 'events',
+    'logger.log': 'logger',
+    'effect.register': 'effect',
+};
+/**
  * A registrar owns one plugin's registrations on the loader's context.
  *
  * The caller constructs one registrar per plugin, hands it to the backend as
@@ -131,6 +148,13 @@ export class PluginRegistrar {
     async handle(op, payload = {}) {
         if (this.#disposed && op !== 'logger.log') {
             throw new Error(`plugin ${this.spec.id} has been unloaded`);
+        }
+        const capability = OPERATION_CAPABILITY[op];
+        // The manifest defaults every switch to true, so a specification that
+        // carries no capabilities object allows the whole surface.
+        if (capability !== undefined && this.spec.capabilities?.[capability] === false) {
+            throw new Error(`plugin ${this.spec.id} declares capabilities.${capability} as false, ` +
+                `so "${op}" is not available`);
         }
         switch (op) {
             case 'tools.register':

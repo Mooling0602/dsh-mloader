@@ -96,7 +96,7 @@ dsh main process (Node, Cordis)
 | `entry` | 是 | 字符串 | 无 | 直接位于清单目录中的入口文件名。分隔符、绝对路径、盘符前缀和向上跳转的路径段都会被拒绝，所以入口永远指向插件目录之内。会解析为绝对路径。 |
 | `enabled` | 否 | 布尔 | `true` | 为 `false` 时插件会被发现并报告，但不启动。 |
 | `inject` | 否 | 字符串数组 | `[]` | 在启动载荷中转发给插件的元数据。不授予能力，也不解析宿主服务。 |
-| `capabilities` | 否 | 对象 | 全 `true` | 开关 `tools`、`events`、`logger`、`effect` 和 `commands`。它们是声明性元数据：v1 不强制执行，所以设为 `false` 只表示意图。强制边界是第 3 节的注册操作白名单和第 3.3 节的事件白名单。 |
+| `capabilities` | 否 | 对象 | 全 `true` | 开关 `tools`、`events`、`logger`、`effect` 和 `commands`。设为 `false` 会让对应的注册操作失败：加载器在通道处拒绝该操作并点名这个开关，因此声明关闭某项能力的插件无法使用它。第 3.3 节的事件白名单和第 3.5 节的 schema 子集在这些开关之上继续生效。 |
 | `timeouts.startupMs` | 否 | 数字 | `10000` | 启动握手和 WebAssembly 模块初始化的截止时间，单位毫秒。 |
 | `timeouts.callMs` | 否 | 数字 | `30000` | 一次工具调用或一次事件投递的截止时间，单位毫秒。 |
 | `env` | 否 | 对象 | `{}` | Python 子进程的额外环境变量。值会转成字符串。WebAssembly 后端忽略。 |

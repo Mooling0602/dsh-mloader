@@ -96,7 +96,7 @@ The manifest is the authoritative source of plugin identity and backend selectio
 | `entry` | yes | string | none | Entry file name directly in the manifest directory. A separator, an absolute path, a drive prefix or a traversal segment is rejected, so the entry never points outside the plugin directory. It is resolved to an absolute path. |
 | `enabled` | no | boolean | `true` | When `false`, the plugin is discovered and reported but not started. |
 | `inject` | no | string[] | `[]` | Metadata forwarded to the plugin in its startup payloads. It grants no capability and resolves no host service. |
-| `capabilities` | no | object | all `true` | Switches `tools`, `events`, `logger`, `effect` and `commands`. They are declared metadata: v1 does not enforce them, so setting one to `false` states intent only. The enforced boundaries are the registration operation whitelist in §3 and the event whitelist in §3.3. |
+| `capabilities` | no | object | all `true` | Switches `tools`, `events`, `logger`, `effect` and `commands`. A switch set to `false` makes the matching registration operation fail: the loader rejects it at the channel and names the switch, so a plugin that declares a capability off cannot use it. The event whitelist in §3.3 and the schema subset in §3.5 apply on top of these switches. |
 | `timeouts.startupMs` | no | number | `10000` | Deadline for the startup handshake and WebAssembly module initialization, in milliseconds. |
 | `timeouts.callMs` | no | number | `30000` | Deadline for one tool call or one event delivery, in milliseconds. |
 | `env` | no | object | `{}` | Extra environment variables for a Python child process. Values are converted to strings. Ignored by the WebAssembly backend. |
