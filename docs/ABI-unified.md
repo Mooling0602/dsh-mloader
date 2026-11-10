@@ -252,6 +252,8 @@ The operation names and payload shapes below are shared by every backend. The fr
 
 Every frame carries `"v": 1`. Request identifiers are matched by `id`; identifiers in the two directions are independent.
 
+Both sides check the version before they act on a frame. A frame whose `v` is not `1`, including a frame that omits it, is refused: the Python backend answers such a request with `ok:false` and drops such a reply, and the Python runtime reports the frame on its diagnostics stream and does not act on it. The mismatch is reported once, with both versions named, so a runtime built for another protocol never looks like a plugin that silently does nothing.
+
 Host to plugin request:
 
 ```json

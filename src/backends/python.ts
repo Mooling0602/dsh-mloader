@@ -108,22 +108,40 @@ export interface PythonBackendOptions {
   enablePyc?: boolean
 }
 
+/** Outcome of parsing one stdout line. */
+type ParsedLine =
+  | { kind: 'frame'; frame: ProtocolFrame }
+  | { kind: 'foreign'; frame: ProtocolFrame; version: number | undefined }
+  | { kind: 'ignored' }
+
 /**
  * Parse one stdout line into a protocol frame.
  *
+ * The protocol version is checked here rather than at the call site, because a
+ * mismatched frame is not a malformed line: it is a well formed frame written
+ * by a runtime that speaks another version. Handling it as foreign keeps an
+ * older loader from acting on operations whose payload shape it does not know,
+ * which is the whole point of putting a version in the envelope.
+ *
  * @param line - One complete line from the child process.
- * @returns The frame, or null when the line is not a JSON object.
+ * @returns The parsed frame, or why the line carries no usable frame.
  */
-function parseFrame(line: string): ProtocolFrame | null {
+function parseFrame(line: string): ParsedLine {
   const text = line.trim()
-  if (!text.startsWith('{')) return null
+  if (!text.startsWith('{')) return { kind: 'ignored' }
+  let parsed: unknown
   try {
-    const frame = JSON.parse(text) as unknown
-    if (frame === null || typeof frame !== 'object') return null
-    return frame as ProtocolFrame
+    parsed = JSON.parse(text)
   } catch {
-    return null
+    return { kind: 'ignored' }
   }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { kind: 'ignored' }
+  }
+  const frame = parsed as ProtocolFrame
+  const version = typeof frame.v === 'number' ? frame.v : undefined
+  if (version !== PROTOCOL_VERSION) return { kind: 'foreign', frame, version }
+  return { kind: 'frame', frame }
 }
 
 /**
@@ -167,6 +185,8 @@ export class PythonBackendInstance implements BackendInstance {
    * another EPIPE, so later frames are dropped instead.
    */
   private stdinBroken = false
+  /** Set after the first frame from another protocol version was refused. */
+  private foreignVersionReported = false
   private onInboundRequest: InboundHandler | null = null
 
   /**
@@ -322,13 +342,47 @@ export class PythonBackendInstance implements BackendInstance {
       const line = this.buffer.slice(0, index)
       this.buffer = this.buffer.slice(index + 1)
       if (!line.trim()) continue
-      const frame = parseFrame(line)
-      if (frame === null) {
+      const parsed = parseFrame(line)
+      if (parsed.kind === 'ignored') {
         this.logger?.warn?.(`[${this.spec.id}] non-protocol stdout: ${line.slice(0, 200)}`)
         continue
       }
-      this.#onFrame(frame)
+      if (parsed.kind === 'foreign') {
+        this.#rejectForeignVersion(parsed.frame, parsed.version)
+        continue
+      }
+      this.#onFrame(parsed.frame)
     }
+  }
+
+  /**
+   * Refuse one frame written by a runtime that speaks another protocol version.
+   *
+   * A request is answered so the plugin is not left waiting for a reply that
+   * never comes, and the answer names both versions. A reply is dropped and the
+   * request it would have settled stays pending until its deadline, because the
+   * host cannot trust a result whose shape it does not know. Every refusal is
+   * logged once per instance so a version mismatch is visible rather than
+   * looking like a plugin that silently does nothing.
+   *
+   * @param frame - The rejected frame.
+   * @param version - Version the frame declared, or undefined when it declared none.
+   */
+  #rejectForeignVersion(frame: ProtocolFrame, version: number | undefined): void {
+    if (!this.foreignVersionReported) {
+      this.foreignVersionReported = true
+      this.logger?.warn?.(
+        `[${this.spec.id}] protocol version ${version ?? 'missing'} is not ` +
+        `${PROTOCOL_VERSION}; frames from this plugin are rejected`,
+      )
+    }
+    if (frame.op === undefined || frame.notification === true) return
+    this.#respond(frame.id, {
+      ok: false,
+      error: {
+        message: `protocol version ${version ?? 'missing'} is not supported; this loader speaks version ${PROTOCOL_VERSION}`,
+      },
+    })
   }
 
   /**
