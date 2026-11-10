@@ -150,7 +150,17 @@ await rejects(
 await rejects(
   'rejects an entry with a separator',
   buildZip([{ name: 'mloader.plugin.json', data: '{"id":"demo","backend":"python","entry":"sub/entry.py"}' }]),
-  /entry must name a file at the archive root/u,
+  /entry must name a file at the plugin root/u,
+)
+await rejects(
+  'rejects an entry that escapes the plugin root',
+  buildZip([{ name: 'mloader.plugin.json', data: '{"id":"demo","backend":"python","entry":"../entry.py"}' }]),
+  /entry must name a file at the plugin root/u,
+)
+await rejects(
+  'rejects an entry that names the plugin root itself',
+  buildZip([{ name: 'mloader.plugin.json', data: '{"id":"demo","backend":"python","entry":".."}' }]),
+  /entry must name a file at the plugin root/u,
 )
 await rejects(
   'rejects a manifest entry that the archive lacks',

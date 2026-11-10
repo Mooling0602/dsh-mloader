@@ -93,7 +93,7 @@ The manifest is the authoritative source of plugin identity and backend selectio
 | `name` | no | string | `id` | Human readable name. |
 | `version` | no | string | `"0.0.0"` | Informational version string. |
 | `backend` | yes | `"python"` or `"wasm"` | none | Selects the backend that hosts the plugin. |
-| `entry` | yes | string | none | Entry file path relative to the manifest directory. It is resolved to an absolute path. |
+| `entry` | yes | string | none | Entry file name directly in the manifest directory. A separator, an absolute path, a drive prefix or a traversal segment is rejected, so the entry never points outside the plugin directory. It is resolved to an absolute path. |
 | `enabled` | no | boolean | `true` | When `false`, the plugin is discovered and reported but not started. |
 | `inject` | no | string[] | `[]` | Metadata forwarded to the plugin in its startup payloads. It grants no capability and resolves no host service. |
 | `capabilities` | no | object | all `true` | Switches `tools`, `events`, `logger`, `effect` and `commands`. They are declared metadata: v1 does not enforce them, so setting one to `false` states intent only. The enforced boundaries are the registration operation whitelist in §3 and the event whitelist in §3.3. |

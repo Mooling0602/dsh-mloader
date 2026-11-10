@@ -13,8 +13,9 @@
 import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { posix } from 'node:path'
-import { isValidPluginId, RESERVED_PLUGIN_IDS } from '../contract.js'
+import { RESERVED_PLUGIN_IDS } from '../contract.js'
 import { MANIFEST_NAME } from '../discovery.js'
+import { validateManifestFields } from '../manifest.js'
 import type { BackendKind } from '../types.js'
 import { openZip, type ZipArchive, type ZipEntry } from './zip.js'
 
@@ -143,7 +144,18 @@ function validateArchive(archive: ZipArchive): void {
   }
 }
 
-/** Parse and validate one manifest object. */
+/**
+ * Parse and validate one manifest object.
+ *
+ * The field rules come from the shared validator, so an archive is rejected for
+ * the same reasons discovery rejects an installed directory. An archive carries
+ * no built-in marker, so a reserved plugin id is always rejected here.
+ *
+ * @param raw - Manifest bytes.
+ * @param source - Name used in diagnostics.
+ * @returns The validated manifest.
+ * @throws {PackageError} When the manifest is not a JSON object of the expected shape.
+ */
 function parseManifest(raw: Buffer, source: string): PackageManifest {
   let parsed: unknown
   try {
@@ -154,36 +166,18 @@ function parseManifest(raw: Buffer, source: string): PackageManifest {
   if (!isRecord(parsed)) {
     throw new PackageError(`${source} must contain a JSON object`)
   }
-  const id = parsed.id
-  if (!isValidPluginId(id)) {
-    throw new PackageError(`${source}: id must match ^[a-z0-9][a-z0-9_-]{0,31}$`)
+  const violation = validateManifestFields(parsed)[0]
+  if (violation !== undefined) {
+    throw new PackageError(`${source}: ${violation.message}`)
   }
+  const id = parsed.id as string
+  // An archive carries no built-in marker, so it can never install a reserved
+  // id. Discovery admits one through the marker; a package has no such escape.
   if (RESERVED_PLUGIN_IDS.has(id)) {
-    throw new PackageError(
-      `${source}: plugin id "${id}" is reserved for the bundled example`,
-    )
+    throw new PackageError(`${source}: plugin id "${id}" is reserved for the bundled example`)
   }
-  const backend = parsed.backend
-  if (backend !== 'python' && backend !== 'wasm') {
-    throw new PackageError(
-      `${source}: backend must be "python" or "wasm", got ${JSON.stringify(backend)}`,
-    )
-  }
-  const entry = parsed.entry
-  if (typeof entry !== 'string' || entry.length === 0) {
-    throw new PackageError(`${source}: entry is required and must be a non-empty string`)
-  }
-  if (
-    entry.includes('\\') ||
-    entry.startsWith('/') ||
-    DRIVE_PATTERN.test(entry) ||
-    entry.includes('/') ||
-    posix.normalize(entry) !== entry ||
-    entry === '.' ||
-    entry === '..'
-  ) {
-    throw new PackageError(`${source}: entry must name a file at the archive root`)
-  }
+  const backend = parsed.backend as BackendKind
+  const entry = parsed.entry as string
   const name = typeof parsed.name === 'string' && parsed.name.length > 0 ? parsed.name : id
   const version = typeof parsed.version === 'string' ? parsed.version : '0.0.0'
   return {

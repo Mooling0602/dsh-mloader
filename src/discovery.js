@@ -9,7 +9,8 @@
  */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { BUILTIN_MARKER_NAME, isValidPluginId, RESERVED_PLUGIN_IDS } from './contract.js';
+import { BUILTIN_MARKER_NAME, RESERVED_PLUGIN_IDS } from './contract.js';
+import { validateManifestFields } from './manifest.js';
 /** Metadata file name that marks a plugin directory. */
 export const MANIFEST_NAME = 'mloader.plugin.json';
 /**
@@ -33,19 +34,18 @@ async function readManifest(path) {
         throw new Error(`${path} must contain a JSON object`);
     }
     const baseDir = dirname(path);
-    const id = parsed.id;
-    if (!isValidPluginId(id)) {
-        throw new Error(`${path}: id ${JSON.stringify(id)} must match ^[a-z0-9][a-z0-9_-]{0,31}$`);
+    // The shared validator reports a bad id, a reserved id, a bad backend and an
+    // entry that is not a plain file name, so an installed directory is rejected
+    // for exactly the reasons an archive is.
+    const violation = validateManifestFields(parsed)[0];
+    if (violation !== undefined) {
+        throw new Error(`${path}: ${violation.message}`);
     }
+    const id = parsed.id;
+    const backend = parsed.backend;
+    const entry = parsed.entry;
     if (RESERVED_PLUGIN_IDS.has(id))
         await assertBuiltinAllowed(path, baseDir, id);
-    const backend = parsed.backend;
-    if (backend !== 'python' && backend !== 'wasm') {
-        throw new Error(`${path}: backend must be "python" or "wasm", got ${JSON.stringify(backend)}`);
-    }
-    if (typeof parsed.entry !== 'string' || parsed.entry.length === 0) {
-        throw new Error(`${path}: entry is required and must be a non-empty string`);
-    }
     const timeouts = isRecord(parsed.timeouts) ? parsed.timeouts : {};
     const capabilities = isRecord(parsed.capabilities) ? parsed.capabilities : {};
     const rawEnv = isRecord(parsed.env) ? parsed.env : {};
@@ -57,8 +57,8 @@ async function readManifest(path) {
         id,
         name: typeof parsed.name === 'string' && parsed.name ? parsed.name : id,
         version: typeof parsed.version === 'string' ? parsed.version : '0.0.0',
-        backend: backend,
-        entry: resolve(baseDir, parsed.entry),
+        backend,
+        entry: resolve(baseDir, entry),
         baseDir,
         manifestPath: path,
         enabled: parsed.enabled !== false,
