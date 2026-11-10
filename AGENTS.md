@@ -112,6 +112,14 @@ Material addressed to third party plugin developers. The audience is a professio
 - One fact, one home. Link to it instead of repeating it, because duplicated prose drifts out of sync. **`CONTEXT.md` is the exception.** It exists so that an agent can load the working model of the system from one file, so it repeats a fact that also lives in `docs/`, in `AGENTS.md` or in `README.md` whenever the second copy saves the reader another file, and it keeps detail those documents leave out. That repetition is deliberate, so a change updates the `CONTEXT.md` copy even when the authoritative statement lives elsewhere.
 - A change to behaviour, to the ABI or to an invariant must update the owning document in the same change, including `CONTEXT.md` whenever it describes the affected area.
 
+### Working area under `sdk-repos/`
+
+`sdk-repos/` is git-ignored and holds the SDK repositories this project publishes from. Each directory inside it is its own git repository with its own remote, so this repository tracks none of it.
+
+- Never commit anything from `sdk-repos/`, and never add an ignore exception that would expose it.
+- Never make `src/`, `package.json`, `cordis.patch.yml` or a test suite read from it. `src/runtime/python_sdk/` stays the source of the code the SDK repository copies.
+- Changes to an SDK repository are made in that checkout and follow that repository's own instructions. The copy out of this repository is a maintainer step, not a build.
+
 ## 5. Technical changes: document the new state, delete the old one
 
 A change is not a story about a change. Once it lands, the repository describes only how the system works now.

@@ -90,7 +90,7 @@ docs/wasm/Package.md       WebAssembly package layout, one portable .wasm entry
 
 Each document under `docs/` has a Simplified Chinese counterpart at the same path with a `.zh.md` suffix. Each pair carries a language selector at the top that links to the other.
 
-Top level files: `AGENTS.md` (rules), `CONTEXT.md` (this file), `README.md` and `README.zh.md` (users), `NOTICE` (copyright and license mapping), `LICENSE`, `COPYING` and `COPYING.LESSER` (license texts), `package.json` (package metadata and scripts), `pnpm-lock.yaml`, `tsconfig.json` (host compiler configuration), `tsconfig.client.json` (browser half compiler configuration), `client.js` (generated browser bundle), `locale/` (the title and description the Plugins page renders, per language), `cordis.patch.yml` (default loader configuration), `scripts/` (maintainer build scripts), `.markdownlint.json` (Markdown lint policy) and `.gitignore`. The `.build/` intermediate directory is ignored.
+Top level files: `AGENTS.md` (rules), `CONTEXT.md` (this file), `README.md` and `README.zh.md` (users), `NOTICE` (copyright and license mapping), `LICENSE`, `COPYING` and `COPYING.LESSER` (license texts), `package.json` (package metadata and scripts), `pnpm-lock.yaml`, `tsconfig.json` (host compiler configuration), `tsconfig.client.json` (browser half compiler configuration), `client.js` (generated browser bundle), `locale/` (the title and description the Plugins page renders, per language), `cordis.patch.yml` (default loader configuration), `scripts/` (maintainer build scripts), `.markdownlint.json` (Markdown lint policy) and `.gitignore`. The `.build/` intermediate directory is ignored, and so is `sdk-repos/`, which holds working clones of the two SDK repositories.
 
 The test tree holds the suites directly under `test/`, the Python test plugins under `test/plugins/`, the fault injection and WebAssembly command fixtures under `test/fixtures/`, the reentrancy fixture under `test/deadlock/reentrant/` and the event projection fixture under `test/exec-payload/exec-observer/`. The source-only WebAssembly example lives under `seeds/wasm-mloader/`, not under the test tree.
 
@@ -135,6 +135,8 @@ The Python SDK is a flat package. Its content is the directory `src/runtime/pyth
 ### Generated SDK copy
 
 The repository `dsh-mloader-python-sdk` (distribution name `dsh-mloader-sdk`, import module `dsh_mloader_sdk`) is a generated copy of `src/runtime/python_sdk/`. A maintainer copies the file set manually from `src/runtime/python_sdk/` into the SDK repository's `src/dsh-mloader-sdk/`. The copy may lag behind this repository; the two trees must be identical when a release is prepared.
+
+`sdk-repos/` is ignored by git and holds the clones a maintainer works from: `sdk-repos/dsh-mloader-python-sdk/` and `sdk-repos/dsh-mloader-wasm-sdk/`. Each is its own git repository with its own remote and history, so this repository tracks neither one. They are working copies for the manual copy step and the checks under "Prepare the Python SDK copy for a release" in section 4. They are not part of the package, and nothing in `src/`, `package.json` or the test suites reads them.
 
 The SDK repository owns everything that is packaging rather than runtime code:
 

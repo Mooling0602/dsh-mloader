@@ -9,3 +9,4 @@ seeds/**/target/
 seeds/**/dist/
 dsh-*.log
 .venv/
+sdk-repos/
