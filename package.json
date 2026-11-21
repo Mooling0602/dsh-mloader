@@ -1,7 +1,7 @@
 {
   "name": "dsh-mloader",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "description": "Multi-runtime plugin loader for DeepSeek Harness: hosts Python and WebAssembly plugins as capabilities of one Cordis plugin.",
   "license": "LGPL-3.0-only",
